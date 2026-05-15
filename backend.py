@@ -264,23 +264,23 @@ def weather():
 
 # --- Crypto ---
 @app.get("/api/crypto")
-def crypto():
+def crypto(ids: str = "bitcoin,ethereum,monero"):
     import urllib.request
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,monero&vs_currencies=usd&include_24hr_change=true"
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true"
         with urllib.request.urlopen(url, timeout=5) as resp:
             data = json.loads(resp.read().decode())
-        return {
-            "bitcoin": {"price": data["bitcoin"]["usd"], "change24": data["bitcoin"]["usd_24h_change"]},
-            "ethereum": {"price": data["ethereum"]["usd"], "change24": data["ethereum"]["usd_24h_change"]},
-            "monero": {"price": data["monero"]["usd"], "change24": data["monero"]["usd_24h_change"]}
-        }
+        result = {}
+        for coin_id in ids.split(","):
+            coin_id = coin_id.strip()
+            if coin_id in data:
+                result[coin_id] = {
+                    "price": data[coin_id]["usd"],
+                    "change24": data[coin_id].get("usd_24h_change", 0)
+                }
+        return result if result else {"bitcoin": {"price": 0, "change24": 0}}
     except:
-        return {
-            "bitcoin": {"price": 97345.12, "change24": 2.34},
-            "ethereum": {"price": 3456.78, "change24": -1.12},
-            "monero": {"price": 212.45, "change24": 0.89}
-        }
+        return {"bitcoin": {"price": 0, "change24": 0}}
 
 # --- Server Status (SSH Agent) ---
 SERVER_CACHE = {"data": None, "ts": 0}

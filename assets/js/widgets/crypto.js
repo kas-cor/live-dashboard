@@ -11,7 +11,7 @@ class CryptoWidget extends BaseWidget {
       { key: 'coins', label: 'Coins (comma-separated)', type: 'text' },
       { key: 'showChange', label: 'Show 24h change', type: 'checkbox' }
     ];
-    this.labels = {bitcoin:'BTC',ethereum:'ETH',monero:'XMR',solana:'SOL',cardano:'ADA',dogecoin:'DOGE',litecoin:'LTC',ripple:'XRP',polkadot:'DOT'};
+    this.labels = {bitcoin:'BTC',ethereum:'ETH',monero:'XMR',solana:'SOL',cardano:'ADA',dogecoin:'DOGE',litecoin:'LTC',ripple:'XRP',polkadot:'DOT',binancecoin:'BNB',chainlink:'LINK',polygon:'MATIC',avalanche:'AVAX',cosmos:'ATOM',near:'NEAR',aptos:'APT',sui:'SUI',pepe:'PEPE',shiba:'SHIB',tether:'USDT', 'the-open-network':'TON'};
   }
 
   render() {
@@ -34,7 +34,7 @@ class CryptoWidget extends BaseWidget {
     const showChange = this.getConfig('showChange', true);
     const coins = coinsStr.split(',').map(c => c.trim()).filter(Boolean);
     let d;
-    try { d = await (await fetch(this.apiUrl)).json(); } catch(e) { return; }
+    try { d = await (await fetch(`${this.apiUrl}?ids=${encodeURIComponent(coinsStr)}`)).json(); } catch(e) { return; }
     const grid = this.element.querySelector('#crypto-grid');
     if(!grid) return;
     grid.innerHTML = coins.map(c => {
