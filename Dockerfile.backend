@@ -21,7 +21,6 @@ WORKDIR /app
 RUN pip install --no-cache-dir fastapi uvicorn python-dotenv httpx
 
 COPY backend.py .
-COPY api/ ./api/
 
 EXPOSE 9090
 CMD ["python", "backend.py"]

@@ -8,7 +8,6 @@ RUN apk add --no-cache openssl && \
       -subj "/C=RU/ST=Moscow/L=Moscow/O=Dashboard/CN=localhost"
 
 COPY assets/ /usr/share/nginx/html/assets/
-COPY api/ /usr/share/nginx/html/api/
 COPY index.html /tmp/index.html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
