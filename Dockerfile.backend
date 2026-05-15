@@ -1,0 +1,27 @@
+FROM python:3.11-slim
+
+# Install Docker CLI from static binary + openssh-client for server monitoring + tailscale
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl openssh-client kmod procps systemd && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz -o /tmp/docker.tgz && \
+    tar xzf /tmp/docker.tgz -C /tmp/ && \
+    mv /tmp/docker/docker /usr/local/bin/docker && \
+    rm -rf /tmp/docker.tgz /tmp/docker && \
+    chmod +x /usr/local/bin/docker && \
+    docker --version && \
+    curl -fsSL https://pkgs.tailscale.com/stable/tailscale_1.80.3_amd64.tgz -o /tmp/ts.tgz && \
+    tar xzf /tmp/ts.tgz -C /tmp/ && \
+    cp /tmp/tailscale_1.80.3_amd64/tailscale /usr/local/bin/tailscale && \
+    cp /tmp/tailscale_1.80.3_amd64/tailscaled /usr/local/bin/tailscaled && \
+    rm -rf /tmp/ts.tgz /tmp/tailscale_1.80.3_amd64 && \
+    tailscale version
+
+WORKDIR /app
+RUN pip install --no-cache-dir fastapi uvicorn python-dotenv httpx
+
+COPY backend.py .
+COPY api/ ./api/
+
+EXPOSE 9090
+CMD ["python", "backend.py"]

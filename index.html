@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg">
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=__CACHEBUSTER__">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body>
+  <div id="dashboard"></div>
+
+  <!-- Core -->
+  <script src="assets/js/core.js?v=__CACHEBUSTER__"></script>
+
+  <!-- Widgets -->
+  <script src="assets/js/widgets/clock.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/weather.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/crypto.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/todo.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/sysload.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/servers.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/sites.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/network.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/docker.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/tailscale.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/logs.js?v=__CACHEBUSTER__"></script>
+
+  <!-- Theme toggle -->
+  <script src="assets/js/widgets/theme-toggle.js"></script>
+
+  <!-- Init -->
+  <script>
+    const API = '';  // use relative paths via nginx proxy
+
+    // --- Alert Manager (singleton, fires before widgets) ---
+    document.addEventListener('DOMContentLoaded', () => {
+      window.alertManager = new AlertManager();
+      window.alertManager.start();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const dashboard = new Dashboard('dashboard');
+
+      // Row 1: small widgets
+      dashboard.register(new ClockWidget('clock', { size: 'small', interval: 1000 }));
+      dashboard.register(new WeatherWidget('weather', { size: 'small', interval: 300000, apiUrl: API + '/api/weather' }));
+      dashboard.register(new CryptoWidget('crypto', { size: 'small', interval: 60000, apiUrl: API + '/api/crypto' }));
+      dashboard.register(new NetworkWidget('network', { size: 'small', interval: 2000 }));
+
+      // Row 2: remote servers (SSH agent)
+      dashboard.register(new ServerWidget('otdelka', {
+        size: 'medium',
+        interval: 15000,
+        apiUrl: API + '/api/server-status',
+        serverId: 'otdelka-store',
+        title: '🖥 Otdelka-Store'
+      }));
+      dashboard.register(new ServerWidget('asterisk', {
+        size: 'medium',
+        interval: 15000,
+        apiUrl: API + '/api/server-status',
+        serverId: 'asterisk',
+        title: '📞 Asterisk'
+      }));
+
+      // Row 3: sysload + todo
+      dashboard.register(new SysLoadWidget('sysload', { size: 'medium', interval: 3000, apiUrl: API + '/api/sysinfo' }));
+      dashboard.register(new TodoWidget('todo', { size: 'medium', interval: 30000, apiUrl: API + '/api/todo' }));
+
+      // Row 4: docker + tailscale
+      dashboard.register(new DockerWidget('docker', { size: 'medium', interval: 10000, apiUrl: API + '/api/docker' }));
+      dashboard.register(new TailscaleWidget('tailscale', { size: 'medium', interval: 15000, apiUrl: API + '/api/tailscale' }));
+
+      // Row 5: site status
+      dashboard.register(new SitesWidget('sites', {
+        size: 'medium',
+        interval: 60000,
+        apiUrl: API + '/api/site-status',
+        title: '🌐 Sites',
+        sites: ['https://oboi-store.ru', 'https://parketov-store.ru']
+      }));
+
+      // Row 6: logs (scrollable)
+      const logsWidget = new LogsWidget('logs', { size: 'large', interval: 5000, apiUrl: API + '/api/logs', lines: 30, service: 'system' });
+      logsWidget._origRender = logsWidget.render;
+      logsWidget.render = function() {
+        this._origRender();
+        if (this.element) this.element.classList.add('widget-scroll');
+      };
+      dashboard.register(logsWidget);
+    });
+  </script>
+</body>
+</html>

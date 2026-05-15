@@ -1,0 +1,50 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: dashboard-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-9090}:${BACKEND_PORT:-9090}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/log:/host/log:ro
+      - /home/hermes/.hermes/todo:/host/todo:ro
+      - /run/tailscale:/var/run/tailscale:ro
+      - /home/hermes/.ssh:/root/.ssh:ro
+      - dashboard-data:/data
+    environment:
+      - HOST_PROC=/host/proc
+      - HOST_SYS=/host/sys
+      - BACKEND_HOSTNAME=claw
+    networks:
+      - dashboard-net
+    cap_add:
+      - SYS_PTRACE
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: dashboard-frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${DASHBOARD_HOST:-127.0.0.1}:${DASHBOARD_PORT:-3003}:8080"
+    depends_on:
+      - backend
+    networks:
+      - dashboard-net
+
+networks:
+  dashboard-net:
+    driver: bridge
+
+volumes:
+  dashboard-data:
