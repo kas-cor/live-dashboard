@@ -18,7 +18,6 @@ class DockerWidget extends BaseWidget {
       { key: 'alertStoppedEnabled', label: '\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043D\u044B\u043C\u0438 \u043A\u043E\u043D\u0442\u0435\u0439\u043D\u0435\u0440\u0430\u043C\u0438', type: 'checkbox' },
       { key: 'alertStoppedThreshold', label: '\u041C\u0430\u043A\u0441. \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043D\u044B\u0445 \u0434\u043E \u0442\u0440\u0435\u0432\u043E\u0433\u0438', type: 'number', min: 0, max: 20, step: 1 }
     ];
-    this._alertedStopped = null; // track which stopped containers we alerted for
   }
 
   render() {
@@ -32,9 +31,12 @@ class DockerWidget extends BaseWidget {
     const showStopped = this.getConfig('showStopped', true);
     const showPorts = this.getConfig('showPorts', true);
     const filterRunning = this.getConfig('filterRunning', false);
-    let data;
-    try { data = await (await fetch(this.apiUrl)).json(); }
-    catch(e) { data = []; }
+    let raw;
+    try { raw = await (await fetch(this.apiUrl)).json(); }
+    catch(e) { raw = []; }
+    // Handle both old format (array) and new format ({containers, alerts})
+    const data = Array.isArray(raw) ? raw : (raw.containers || []);
+    const alerts = Array.isArray(raw) ? [] : (raw.alerts || []);
     const grid = this.element.querySelector('#docker-grid');
     if(!data.length) { grid.innerHTML = '<div class="empty-state">No containers</div>'; return; }
     let filtered = data;
@@ -42,27 +44,10 @@ class DockerWidget extends BaseWidget {
     else if (!showStopped) filtered = data.filter(c => c.running);
     grid.innerHTML = filtered.map(c => '<div class="docker-card ' + (c.running?'running':'stopped') + '"><div class="docker-header"><span class="docker-status ' + (c.running?'status-online':'status-offline') + '"></span><span class="docker-name">' + c.name + '</span></div><div class="docker-meta">' + c.image + '</div><div class="docker-meta">' + c.status + '</div>' + (showPorts && c.ports?'<div class="docker-ports">' + c.ports + '</div>':'') + '</div>').join('');
 
-    // --- Alert: stopped containers ---
-    if (window.alertManager && this.getConfig('alertStoppedEnabled', false)) {
-      const stopped = data.filter(c => !c.running);
-      const threshold = this.getConfig('alertStoppedThreshold', 0);
-      if (stopped.length > threshold) {
-        const stoppedNames = stopped.map(c => c.name).join(', ');
-        const key = stoppedNames; // fingerprint to avoid re-alerting same set
-        if (this._alertedStopped !== key) {
-          this._alertedStopped = key;
-          window.alertManager.trigger({
-            widgetId: this.id,
-            widgetTitle: 'Docker Containers',
-            metric: 'Stopped',
-            value: stopped.length,
-            threshold: threshold,
-            unit: ' \u0448\u0442.',
-            description: 'Docker: ' + stopped.length + ' \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043D\u044B\u0445 \u043A\u043E\u043D\u0442\u0435\u0439\u043D\u0435\u0440\u043E\u0432 (\u043F\u043E\u0440\u043E\u0433: ' + threshold + ').\n' + stoppedNames
-          });
-        }
-      } else {
-        this._alertedStopped = null;
+    // --- Server-side alerts: backend checks thresholds ---
+    if (window.alertManager && alerts.length > 0) {
+      for (const alert of alerts) {
+        window.alertManager.trigger(alert);
       }
     }
   }

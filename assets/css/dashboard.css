@@ -404,6 +404,18 @@ body::before {
 /* Logs */
 .log-viewer { background:var(--log-bg); border:1px solid var(--border); border-radius:8px; padding:12px; font-family:'JetBrains Mono',monospace; font-size:11px; line-height:1.5; color:var(--text-secondary); flex:1; box-sizing:border-box; overflow-y:auto; white-space:pre-wrap; word-break:break-word; min-height:0; }
 
+/* Multi-service log sections */
+.log-sections-container { display:flex; flex-direction:column; height:100%; min-height:0; flex:1; }
+.log-section { display:flex; flex-direction:column; flex:1; min-height:0; }
+.log-section:not(:last-child) { margin-bottom:4px; }
+.log-section:last-child { margin-bottom:0; }
+.log-section-header { display:flex; justify-content:space-between; align-items:center; padding:4px 12px; background:var(--bg-secondary); border:1px solid var(--border); border-bottom:none; border-radius:8px 8px 0 0; flex-shrink:0; }
+.log-section-title { font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:var(--accent); }
+.log-section-count { font-size:10px; color:var(--text-secondary); }
+.log-textarea { width:100%; flex:1; min-height:0; background:var(--log-bg); border:1px solid var(--border); border-radius:0 0 8px 8px; padding:8px 12px; font-family:'JetBrains Mono',monospace; font-size:11px; line-height:1.5; color:var(--text-secondary); resize:none; outline:none; box-sizing:border-box; }
+.log-textarea:focus { border-color:var(--accent); }
+.log-pause-badge { display:inline; font-size:10px; font-weight:400; color:var(--accent-secondary); background:rgba(255,0,170,0.1); padding:1px 8px; border-radius:4px; margin-left:8px; vertical-align:middle; }
+
 /* Weather */
 .weather-body { text-align:center; display:flex; flex-direction:column; justify-content:center; height:100%; gap:8px; }
 .weather-main { display:flex; align-items:center; justify-content:center; gap:12px; }
@@ -799,3 +811,4 @@ body::before {
   transform: translateY(-2px);
   box-shadow: 0 4px 20px rgba(255, 0, 85, 0.4);
 }
+

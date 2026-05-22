@@ -206,8 +206,6 @@ class AlertManager {
     this._tabFlashTimer = null;
     this._origTitle = '';
     this._currentAlert = null;
-    this._webhookUrl = '';
-    this._authToken = '';
     this._notifyPermitted = false;
     // Per-alert cooldown: key = "widgetId|metric" → timestamp (persisted to localStorage)
     this._cooldowns = new Map();
@@ -217,9 +215,6 @@ class AlertManager {
 
   start() {
     this._loadCooldowns();
-
-    // Fetch webhook config
-    this._fetchWebhookUrl();
 
     // Request notification permission early
     this._requestNotifyPermission();
@@ -244,9 +239,9 @@ class AlertManager {
     this._overlay.querySelector('.alert-dismiss').addEventListener('click', () => this.dismiss());
 
     // First-user-gesture listener: unlock audio + notifications
-    const unlockHandler = () => {
+    const unlockHandler = async () => {
       this._ensureAudio();
-      this._requestNotifyPermission();
+      await this._ensureNotifyPermission();
     };
     document.addEventListener('click', unlockHandler, { once: true });
     document.addEventListener('keydown', unlockHandler, { once: true });
@@ -337,24 +332,6 @@ class AlertManager {
     } catch(e) {}
   }
 
-  async _fetchWebhookUrl() {
-    try {
-      const res = await fetch('/api/alert-config', { cache: 'no-store' });
-      if (res.ok) {
-        const cfg = await res.json();
-        this._webhookUrl = (cfg.webhook_url || '').trim();
-        this._authToken = (cfg.auth_token || '').trim();
-        console.log('[AlertManager] webhook config loaded:', { url: this._webhookUrl, hasToken: !!this._authToken });
-      } else {
-        console.warn('[AlertManager] failed to fetch alert-config:', res.status);
-      }
-    } catch(e) {
-      console.error('[AlertManager] error fetching alert-config:', e);
-      this._webhookUrl = '';
-      this._authToken = '';
-    }
-  }
-
   _requestNotifyPermission() {
     if (!('Notification' in window)) return;
     if (Notification.permission === 'granted') {
@@ -429,8 +406,7 @@ class AlertManager {
     // _startSiren now fails silently if AudioContext not yet resumed — that's intentional
     this._startSiren();
 
-    // Webhook POST
-    this._sendWebhook(alert, desc);
+    // Webhook is now sent server-side — no need to duplicate from frontend
   }
 
   async _sendPushNotification(title, body) {
@@ -484,37 +460,6 @@ class AlertManager {
       window.scrollTo(0, 0);
     } catch(e) {
       // Browser may block programmatic focus
-    }
-  }
-
-  async _sendWebhook(alert, description) {
-    try {
-      const msg = {
-        type: 'alert',
-        timestamp: new Date().toISOString(),
-        widget_id: alert.widgetId || '',
-        widget_title: alert.widgetTitle || '',
-        metric: alert.metric || '',
-        value: alert.value,
-        threshold: alert.threshold,
-        unit: alert.unit || '',
-        description: description
-      };
-      const payload = { messages: [msg] };
-      console.log('[AlertManager] sending alert to backend /api/alert', payload);
-      const response = await fetch('/api/alert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) {
-        const txt = await response.text().catch(() => '');
-        console.warn('[AlertManager] /api/alert failed:', response.status, response.statusText, txt);
-      } else {
-        console.log('[AlertManager] alert accepted by backend');
-      }
-    } catch(e) {
-      console.error('[AlertManager] /api/alert error:', e);
     }
   }
 

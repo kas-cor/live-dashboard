@@ -19,3 +19,4 @@ RUN HASH=$(find /usr/share/nginx/html/assets -type f -exec md5sum {} \; | sort |
     chown -R nginx:nginx /usr/share/nginx/html && chmod -R 755 /usr/share/nginx/html
 
 EXPOSE 8080
+EXPOSE 8443

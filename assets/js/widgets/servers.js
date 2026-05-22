@@ -27,8 +27,6 @@ class ServerWidget extends BaseWidget {
       { key: 'alertDiskEnabled', label: 'Следить за Disk', type: 'checkbox' },
       { key: 'alertDiskThreshold', label: 'Порог Disk (%)', type: 'range', min: 50, max: 100, step: 1 }
     ];
-    this._alerted = {};
-    this._alertedOffline = false;
   }
 
   render() {
@@ -74,7 +72,7 @@ class ServerWidget extends BaseWidget {
     const hostEl = body.querySelector('.hostname-line');
     const statusClass = server.online ? 'status-online' : 'status-offline';
     const statusText = server.online ? 'Online' : 'Offline';
-    if (hostEl) hostEl.innerHTML = '<span class="status-indicator ' + statusClass + '"></span> ' + (server.name || server.id) + ' \u2014 ' + statusText;
+    if (hostEl) hostEl.innerHTML = '<span class="status-indicator ' + statusClass + '\"></span> ' + (server.name || server.id) + ' \u2014 ' + statusText;
 
     // Update labels with absolute values
     const cpuInfo = server.cpu_model || '';
@@ -121,55 +119,11 @@ class ServerWidget extends BaseWidget {
     setVal('uptime-value', server.online ? (server.uptime || '--') : 'OFFLINE');
     setVal('load-value', (server.load1 != null ? server.load1.toFixed(2) : '--') + ' / ' + (server.load5 != null ? server.load5.toFixed(2) : '--') + ' / ' + (server.load15 != null ? server.load15.toFixed(2) : '--'));
 
-    // --- Alert: offline ---
-    if (window.alertManager) {
-      const hostname = server.name || server.id;
-      if (!server.online && this.getConfig('alertOfflineEnabled', true)) {
-        if (!this._alertedOffline) {
-          this._alertedOffline = true;
-          window.alertManager.trigger({
-            widgetId: this.id,
-            widgetTitle: this.title + ' (' + hostname + ')',
-            metric: 'Доступность',
-            value: 0,
-            threshold: 0,
-            unit: '',
-            description: this.title + ' (' + hostname + '): сервер НЕДОСТУПЕН (Offline).\nНет ответа по SSH — проверьте соединение.'
-          });
-        }
-      } else if (server.online) {
-        this._alertedOffline = false;
+    // --- Server-side alerts: backend checks thresholds, we only display ---
+    if (window.alertManager && server.alerts && server.alerts.length > 0) {
+      for (const alert of server.alerts) {
+        window.alertManager.trigger(alert);
       }
-
-      // Metric alerts (only when online)
-      if (server.online) {
-        this._checkAlert('CPU', cpuVal, 'alertCpuEnabled', 'alertCpuThreshold', hostname);
-        this._checkAlert('RAM', ramVal, 'alertRamEnabled', 'alertRamThreshold', hostname);
-        this._checkAlert('Disk', diskVal, 'alertDiskEnabled', 'alertDiskThreshold', hostname);
-      }
-    }
-  }
-
-  _checkAlert(metricName, value, enabledKey, thresholdKey, hostname) {
-    const enabled = this.getConfig(enabledKey, false);
-    if (!enabled) return;
-    const threshold = this.getConfig(thresholdKey, 90);
-    if (value > threshold) {
-      const key = this.id + '-' + metricName;
-      if (this._alerted[key]) return;
-      this._alerted[key] = true;
-      window.alertManager.trigger({
-        widgetId: this.id,
-        widgetTitle: this.title + ' (' + hostname + ')',
-        metric: metricName,
-        value: value,
-        threshold: threshold,
-        unit: '%',
-        description: this.title + ' (' + hostname + '): ' + metricName + ' \u0434\u043E\u0441\u0442\u0438\u0433 ' + value + '% (\u043F\u043E\u0440\u043E\u0433: ' + threshold + '%).\n\u041F\u0440\u0435\u0432\u044B\u0448\u0435\u043D\u0438\u0435 \u043D\u0430 ' + (value - threshold).toFixed(0) + '%.'
-      });
-    } else {
-      const key = this.id + '-' + metricName;
-      delete this._alerted[key];
     }
   }
 }

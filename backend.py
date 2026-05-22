@@ -9,8 +9,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+import asyncio
+import datetime
+import logging
 import uvicorn
 import httpx
+
+logger = logging.getLogger("dashboard")
 
 # Load .env if present
 load_dotenv()
@@ -28,8 +33,178 @@ def get_db():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.execute("CREATE TABLE IF NOT EXISTS widget_config (widget_id TEXT PRIMARY KEY, config TEXT NOT NULL)")
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS alert_cooldowns (
+            alert_key TEXT PRIMARY KEY,
+            triggered_at REAL NOT NULL,
+            value REAL DEFAULT 0
+        )
+    """)
+    # Seed sites from env if DB empty
+    seed = os.environ.get("SITES_SEED", "").strip()
+    if seed:
+        row = db.execute("SELECT config FROM widget_config WHERE widget_id = ?", ("sites",)).fetchone()
+        if not row or not json.loads(row["config"]).get("sites"):
+            sites = [s.strip() for s in seed.split(",") if s.strip()]
+            if sites:
+                existing = json.loads(row["config"]) if row else {}
+                existing["sites"] = sites
+                db.execute("INSERT OR REPLACE INTO widget_config (widget_id, config) VALUES (?, ?)",
+                           ("sites", json.dumps(existing)))
     db.commit()
     return db
+
+def get_widget_config_dict(widget_id: str) -> dict:
+    """Read a widget's config from DB, return empty dict if not found."""
+    try:
+        db = get_db()
+        row = db.execute("SELECT config FROM widget_config WHERE widget_id = ?", (widget_id,)).fetchone()
+        db.close()
+        if row:
+            return json.loads(row["config"])
+    except Exception:
+        pass
+    return {}
+
+
+# --- Alert Service (server-side threshold checking) ---
+ALERT_CHECK_INTERVAL = int(os.environ.get("ALERT_CHECK_INTERVAL", "60"))
+ALERT_COOLDOWN_SECS = int(os.environ.get("ALERT_COOLDOWN_MINUTES", "10")) * 60
+
+class AlertService:
+    def should_trigger(self, alert_key: str) -> bool:
+        now = time.time()
+        db = get_db()
+        row = db.execute("SELECT triggered_at FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
+        db.close()
+        if row:
+            if now - row["triggered_at"] < ALERT_COOLDOWN_SECS:
+                return False
+        return True
+
+    def mark_triggered(self, alert_key: str):
+        now = time.time()
+        db = get_db()
+        db.execute(
+            "INSERT OR REPLACE INTO alert_cooldowns (alert_key, triggered_at, value) VALUES (?, ?, ?)",
+            (alert_key, now, 0)
+        )
+        db.commit()
+        db.close()
+
+    def reset_cooldown(self, alert_key: str):
+        db = get_db()
+        db.execute("DELETE FROM alert_cooldowns WHERE alert_key = ?", (alert_key,))
+        db.commit()
+        db.close()
+
+    def check_metric(self, source: str, widget_id: str, hostname: str,
+                     metric_name: str, value: float, threshold: float,
+                     enabled: bool, unit: str = "%") -> dict | None:
+        if not enabled:
+            return None
+        alert_key = f"{widget_id}|{metric_name}"
+        if value > threshold:
+            if not self.should_trigger(alert_key):
+                return None
+            self.mark_triggered(alert_key)
+            desc = (f"{source} ({hostname}): {metric_name} достиг {value:.0f}{unit} "
+                    f"(порог: {threshold:.0f}{unit}).\n"
+                    f"Превышение на {value - threshold:.0f}{unit}.")
+            return {
+                "widget_id": widget_id,
+                "widget_title": f"{source} ({hostname})",
+                "metric": metric_name,
+                "value": value,
+                "threshold": threshold,
+                "unit": unit,
+                "description": desc
+            }
+        else:
+            self.reset_cooldown(alert_key)
+            return None
+
+    def check_metrics(self, source: str, widget_id: str, hostname: str,
+                      metrics: dict, config: dict) -> list[dict]:
+        alerts = []
+        checks = [
+            ("CPU", metrics.get("cpu", 0), "alertCpuEnabled", "alertCpuThreshold"),
+            ("RAM", metrics.get("ram", 0), "alertRamEnabled", "alertRamThreshold"),
+            ("Disk", metrics.get("disk", 0), "alertDiskEnabled", "alertDiskThreshold"),
+        ]
+        for name, val, enabled_key, threshold_key in checks:
+            enabled = config.get(enabled_key, True)
+            threshold = config.get(threshold_key, 90)
+            alert = self.check_metric(source, widget_id, hostname, name, val, threshold, enabled)
+            if alert:
+                alerts.append(alert)
+        return alerts
+
+    def pending_alerts(self, widget_id: str, hostname: str, source: str,
+                       metrics: dict, config: dict) -> list[dict]:
+        """Return currently-active (in cooldown) alerts for API response."""
+        alerts = []
+        checks = [
+            ("CPU", metrics.get("cpu", 0), "alertCpuEnabled", "alertCpuThreshold"),
+            ("RAM", metrics.get("ram", 0), "alertRamEnabled", "alertRamThreshold"),
+            ("Disk", metrics.get("disk", 0), "alertDiskEnabled", "alertDiskThreshold"),
+        ]
+        db = get_db()
+        now = time.time()
+        for name, val, enabled_key, threshold_key in checks:
+            enabled = config.get(enabled_key, True)
+            threshold = config.get(threshold_key, 90)
+            if not enabled or val <= threshold:
+                continue
+            alert_key = f"{widget_id}|{name}"
+            row = db.execute("SELECT triggered_at FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
+            if row and (now - row["triggered_at"]) < ALERT_COOLDOWN_SECS:
+                alerts.append({
+                    "widget_id": widget_id,
+                    "widget_title": f"{source} ({hostname})",
+                    "metric": name,
+                    "value": val,
+                    "threshold": threshold,
+                    "unit": "%",
+                    "description": f"{source} ({hostname}): {name} достиг {val:.0f}% (порог: {threshold:.0f}%)."
+                })
+        db.close()
+        return alerts
+
+    async def send_webhook(self, alerts: list[dict]):
+        if not alerts:
+            return
+        webhook_url = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
+        if not webhook_url:
+            return
+        auth_token = os.environ.get("ALERT_WEBHOOK_AUTH_TOKEN", "").strip()
+        headers = {"Content-Type": "application/json"}
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
+        messages = []
+        for a in alerts:
+            messages.append({
+                "type": "alert",
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "widget_id": a["widget_id"],
+                "widget_title": a["widget_title"],
+                "metric": a["metric"],
+                "value": a["value"],
+                "threshold": a["threshold"],
+                "unit": a["unit"],
+                "description": a["description"]
+            })
+        payload = {"messages": messages}
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(webhook_url, json=payload, headers=headers, timeout=10)
+            logger.info(f"Alert webhook sent: {resp.status_code} ({len(alerts)} alerts)")
+        except Exception as e:
+            logger.error(f"Alert webhook send failed: {e}")
+
+
+# Singleton
+alert_service = AlertService()
 
 # --- System Info ---
 @app.get("/api/sysinfo")
@@ -86,11 +261,24 @@ def sysinfo():
         df_out = subprocess.check_output(["df","-h","/"]).decode().strip().split('\n')
         total_disk_str = df_out[1].split()[1] if len(df_out) > 1 else ''
     except: total_disk_str = ''
+    # Server-side alert check
+    metrics = {"cpu": cpu, "ram": mem, "disk": disk}
+    config = get_widget_config_dict("sysload")
+    new_alerts = alert_service.check_metrics("System Load", "sysload", hostname, metrics, config)
+    pending = alert_service.pending_alerts("sysload", hostname, "System Load", metrics, config)
+    # Fire-and-forget webhook for new alerts (sync version — won't block)
+    if new_alerts:
+        try:
+            loop = asyncio.get_event_loop()
+            loop.create_task(alert_service.send_webhook(new_alerts))
+        except RuntimeError:
+            pass
     return {"cpu": cpu, "ram": mem, "disk": disk, "uptime": uptime,
             "load1": float(load[0]), "load5": float(load[1]), "load15": float(load[2]),
             "hostname": hostname,
             "cpu_model": cpu_model, "cpu_cores": cpu_cores,
-            "total_ram": f"{total_ram_gb}GB", "total_disk": total_disk_str}
+            "total_ram": f"{total_ram_gb}GB", "total_disk": total_disk_str,
+            "alerts": pending}
 
 # --- Docker ---
 @app.get("/api/docker")
@@ -111,7 +299,65 @@ def docker():
                 "running": running,
                 "ports": c.get("Ports","")
             })
-        return containers
+        # Docker: check stopped containers alert
+        stopped = [c for c in containers if not c["running"]]
+        config = get_widget_config_dict("docker")
+        docker_alerts = []
+        if config.get("alertStoppedEnabled", True) and len(stopped) > config.get("alertStoppedThreshold", 0):
+            stopped_names = ", ".join(c["name"] for c in stopped)
+            alert_key = "docker|stopped"
+            # Fingerprint-based dedup (stopped set may change)
+            fp = stopped_names or "none"
+            db = get_db()
+            row = db.execute("SELECT triggered_at, value FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
+            now = time.time()
+            send = False
+            if row:
+                if (now - row["triggered_at"]) >= ALERT_COOLDOWN_SECS or str(row.get("value", "")) != fp:
+                    send = True
+            else:
+                send = True
+            if send:
+                db.execute("INSERT OR REPLACE INTO alert_cooldowns (alert_key, triggered_at, value) VALUES (?, ?, ?)", (alert_key, now, fp))
+                db.commit()
+                db.close()
+                desc = (f"Docker: {len(stopped)} остановленных контейнеров (порог: {config.get('alertStoppedThreshold', 0)}).\n{stopped_names}")
+                alert_data = {
+                    "widget_id": "docker",
+                    "widget_title": "Docker Containers",
+                    "metric": "Stopped",
+                    "value": len(stopped),
+                    "threshold": config.get("alertStoppedThreshold", 0),
+                    "unit": " шт.",
+                    "description": desc
+                }
+                docker_alerts.append(alert_data)
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(alert_service.send_webhook([alert_data]))
+                except RuntimeError:
+                    pass
+            else:
+                # Still report as pending if in cooldown
+                if row and (now - row["triggered_at"]) < ALERT_COOLDOWN_SECS:
+                    docker_alerts.append({
+                        "widget_id": "docker",
+                        "widget_title": "Docker Containers",
+                        "metric": "Stopped",
+                        "value": len(stopped),
+                        "threshold": config.get("alertStoppedThreshold", 0),
+                        "unit": " шт.",
+                        "description": f"Docker: {len(stopped)} остановленных контейнеров."
+                    })
+                db.close()
+        else:
+            # Clear cooldown if condition resolved
+            db = get_db()
+            db.execute("DELETE FROM alert_cooldowns WHERE alert_key = ?", ("docker|stopped",))
+            db.commit()
+            db.close()
+        # Attach alerts to each container (as a convenience field)
+        return {"containers": containers, "alerts": docker_alerts}
     except Exception as e:
         return [{"id":"demo1","name":"nginx","image":"nginx:latest","status":"Up 2 days","running":True,"ports":"80:80"},
                 {"id":"demo2","name":"postgres","image":"postgres:15","status":"Up 5 hours","running":True,"ports":"5432:5432"},
@@ -184,29 +430,31 @@ def tailscale():
 
 # --- Logs ---
 @app.get("/api/logs")
-def logs(lines: int = 30, service: str = "system"):
-    try:
-        if service == "system":
-            # Read from multiple host log files via volume mount
-            cmd = ["bash","-c",f"""
-                {{ tail -n {lines} /host/log/syslog 2>/dev/null;
-                   tail -n {lines} /host/log/messages 2>/dev/null;
-                   tail -n {lines} /host/log/kern.log 2>/dev/null;
-                   tail -n {lines} /host/log/auth.log 2>/dev/null;
-                   dmesg -T 2>/dev/null | tail -n {lines};
-                   journalctl --directory=/host/log/journal -n {lines} --no-pager -o short-iso 2>/dev/null;
-                }} | tac | awk '!seen[$0]++' | head -n {lines} | tac
-            """]
-        else:
-            cmd = ["bash","-c",f"docker logs --tail {lines} {service} 2>/dev/null"]
-        out = subprocess.check_output(cmd, timeout=5).decode()
-        entries = []
-        for line in out.strip().split("\n"):
-            if not line: continue
-            entries.append(line.strip())
-        return {"service": service, "lines": entries[-lines:]}
-    except:
-        return {"service": service, "lines": ["⚠ Не удалось получить логи"]}
+def logs(lines: int = 30, services: str = "system"):
+    svcs = [s.strip() for s in services.split(",") if s.strip()]
+    if not svcs:
+        svcs = ["system"]
+    entries = {}
+    for svc in svcs:
+        try:
+            if svc == "system":
+                cmd = ["bash","-c",f"journalctl -n {lines} --no-page --directory=/host/log/journal 2>/dev/null | tail -n {lines}"]
+            else:
+                m = re.match(r'^\[(\w+)\](.+)$', svc)
+                if m:
+                    uname, u_svc = m.group(1), m.group(2).strip()
+                    cmd = ["bash","-c",f"journalctl --directory=/host/log/journal _SYSTEMD_USER_UNIT={u_svc}.service -n {lines} --no-page 2>/dev/null"]
+                else:
+                    cmd = ["bash","-c",f"journalctl -u {svc} -n {lines} --no-page --directory=/host/log/journal 2>/dev/null"]
+            out = subprocess.check_output(cmd, timeout=5).decode()
+            entry_lines = []
+            for line in out.strip().split("\n"):
+                if not line: continue
+                entry_lines.append(line.strip())
+            entries[svc] = entry_lines[-lines:]
+        except:
+            entries[svc] = [f"⚠ Не удалось получить логи для {svc}"]
+    return {"entries": entries}
 
 # --- TODO ---
 @app.get("/api/todo")
@@ -396,6 +644,67 @@ def get_server_status():
         results[sid] = ssh_collect(cfg["host"], cfg["port"], cfg["user"])
         results[sid]["id"] = sid
         results[sid]["name"] = cfg["name"]
+        # Server-side alert check for each server
+        if results[sid].get("online"):
+            metrics = {"cpu": results[sid].get("cpu", 0),
+                       "ram": results[sid].get("ram", 0),
+                       "disk": results[sid].get("disk", 0)}
+            config = get_widget_config_dict(sid)
+            new_alerts = alert_service.check_metrics(results[sid].get("name", sid),
+                                                     sid, results[sid].get("name", sid),
+                                                     metrics, config)
+            pending = alert_service.pending_alerts(sid, results[sid].get("name", sid),
+                                                   "Server Status", metrics, config)
+            results[sid]["alerts"] = pending
+            if new_alerts:
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(alert_service.send_webhook(new_alerts))
+                except RuntimeError:
+                    pass
+        else:
+            # Server offline alert check
+            config = get_widget_config_dict(sid)
+            if config.get("alertOfflineEnabled", True):
+                alert_key = f"{sid}|Offline"
+                alert_data = None
+                if alert_service.should_trigger(alert_key):
+                    alert_service.mark_triggered(alert_key)
+                    alert_data = {
+                        "widget_id": sid,
+                        "widget_title": f"Server Status ({cfg['name']})",
+                        "metric": "Доступность",
+                        "value": 0,
+                        "threshold": 0,
+                        "unit": "",
+                        "description": f"Server Status ({cfg['name']}): сервер НЕДОСТУПЕН (Offline).\nНет ответа по SSH — проверьте соединение."
+                    }
+                    try:
+                        loop = asyncio.get_event_loop()
+                        loop.create_task(alert_service.send_webhook([alert_data]))
+                    except RuntimeError:
+                        pass
+                    results[sid]["alerts"] = [alert_data]
+                else:
+                    # Still show in pending if cooldown active
+                    db = get_db()
+                    row = db.execute("SELECT triggered_at FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
+                    db.close()
+                    if row and (time.time() - row["triggered_at"]) < ALERT_COOLDOWN_SECS:
+                        results[sid]["alerts"] = [{
+                            "widget_id": sid,
+                            "widget_title": f"Server Status ({cfg['name']})",
+                            "metric": "Доступность",
+                            "value": 0,
+                            "threshold": 0,
+                            "unit": "",
+                            "description": f"Server Status ({cfg['name']}): сервер НЕДОСТУПЕН (Offline)."
+                        }]
+                    else:
+                        results[sid]["alerts"] = []
+            else:
+                results[sid]["alerts"] = []
+    
     SERVER_CACHE["data"] = results
     SERVER_CACHE["ts"] = now
     return results
@@ -403,10 +712,26 @@ def get_server_status():
 # --- Site Status Check ---
 SITE_CACHE = {"data": None, "ts": 0}
 
-SITES_CHECK = [
-    "https://example-site.local",
-    "https://example-site-2.local"
-]
+DEFAULT_SITES = []  # Previously hardcoded — moved to DB for privacy
+
+def get_sites_list():
+    """Get monitored sites from DB config, fallback to empty list."""
+    config = get_widget_config_dict("sites")
+    sites = config.get("sites", [])
+    if not sites:
+        # First run: leave empty, user adds via widget settings
+        return []
+    return sites
+
+def save_sites_list(sites):
+    """Save monitored sites list to DB config."""
+    config = get_widget_config_dict("sites")
+    config["sites"] = sites
+    db = get_db()
+    db.execute("INSERT OR REPLACE INTO widget_config (widget_id, config) VALUES (?, ?)",
+               ("sites", json.dumps(config)))
+    db.commit()
+    db.close()
 
 def check_site(url):
     """Check if a URL returns HTTP 200."""
@@ -424,14 +749,77 @@ def check_site(url):
 @app.get("/api/site-status")
 def get_site_status():
     now = time.time()
-    if SITE_CACHE["data"] and (now - SITE_CACHE["ts"]) < 60:
-        return SITE_CACHE["data"]
-    results = [check_site(url) for url in SITES_CHECK]
-    # Red (offline) first
-    results.sort(key=lambda x: x["online"], reverse=False)
-    SITE_CACHE["data"] = results
-    SITE_CACHE["ts"] = now
-    return results
+    cache_hit = SITE_CACHE["data"] and (now - SITE_CACHE["ts"]) < 60
+    if cache_hit:
+        results = SITE_CACHE["data"]
+    else:
+        urls = get_sites_list()
+        if not urls:
+            return {"sites": [], "alerts": []}
+        results = [check_site(url) for url in urls]
+        # Red (offline) first
+        results.sort(key=lambda x: x["online"], reverse=False)
+        SITE_CACHE["data"] = results
+        SITE_CACHE["ts"] = now
+
+    # Sites: check offline
+    config = get_widget_config_dict("sites")
+    site_alerts = []
+    offline = [s for s in results if not s["online"]]
+    if config.get("alertOfflineEnabled", True) and offline:
+        names = ", ".join(s["url"] for s in offline)
+        statuses = ", ".join(f"{s['url']} ({s['status']})" for s in offline)
+        alert_key = "sites|offline"
+        db = get_db()
+        row = db.execute("SELECT triggered_at, value FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
+        now_ts = time.time()
+        send = False
+        if row:
+            if (now_ts - row["triggered_at"]) >= ALERT_COOLDOWN_SECS or str(row.get("value", "")) != names:
+                send = True
+        else:
+            send = True
+        if send:
+            db.execute("INSERT OR REPLACE INTO alert_cooldowns (alert_key, triggered_at, value) VALUES (?, ?, ?)", (alert_key, now_ts, names))
+            db.commit()
+            db.close()
+            alert_data = {
+                "widget_id": "sites",
+                "widget_title": "Sites",
+                "metric": "Offline",
+                "value": len(offline),
+                "threshold": 0,
+                "unit": " сайт.",
+                "description": f"Обнаружены недоступные сайты ({len(offline)}):\n{statuses}"
+            }
+            site_alerts.append(alert_data)
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(alert_service.send_webhook([alert_data]))
+            except RuntimeError:
+                pass
+        else:
+            if row and (now_ts - row["triggered_at"]) < ALERT_COOLDOWN_SECS:
+                site_alerts.append({
+                    "widget_id": "sites",
+                    "widget_title": "Sites",
+                    "metric": "Offline",
+                    "value": len(offline),
+                    "threshold": 0,
+                    "unit": " сайт.",
+                    "description": f"Обнаружены недоступные сайты ({len(offline)})."
+                })
+            db.close()
+    else:
+        # Clear cooldown if resolved
+        db = get_db()
+        db.execute("DELETE FROM alert_cooldowns WHERE alert_key = ?", ("sites|offline",))
+        db.commit()
+        db.close()
+
+    if site_alerts:
+        return {"sites": results, "alerts": site_alerts}
+    return {"sites": results, "alerts": []}
 
 # --- Alert Webhook Config ---
 @app.get("/api/alert-config")
@@ -520,4 +908,100 @@ def delete_widget_config(widget_id: str):
     return {"status": "deleted"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=HOST, port=PORT)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+
+    # Background alert loop — runs independently of frontend
+    async def background_alert_loop():
+        loop_interval = max(ALERT_CHECK_INTERVAL, 30)
+        logger.info(f"Background alert loop started (interval={loop_interval}s)")
+        while True:
+            try:
+                await asyncio.sleep(loop_interval)
+                alerts = []
+                base_url = f"http://127.0.0.1:{PORT}"
+
+                # Check sysload (local host)
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(f"{base_url}/api/sysinfo", timeout=10)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            metrics = {"cpu": data.get("cpu", 0), "ram": data.get("ram", 0), "disk": data.get("disk", 0)}
+                            config = get_widget_config_dict("sysload")
+                            hostname = data.get("hostname", "localhost")
+                            new = alert_service.check_metrics("System Load", "sysload", hostname, metrics, config)
+                            alerts.extend(new)
+                except Exception as e:
+                    logger.warning(f"Background sysload check failed: {e}")
+
+                # Check remote servers
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(f"{base_url}/api/server-status", timeout=30)
+                        if resp.status_code == 200:
+                            servers = resp.json()
+                            for sid, srv in servers.items():
+                                if srv.get("online"):
+                                    metrics = {"cpu": srv.get("cpu", 0), "ram": srv.get("ram", 0), "disk": srv.get("disk", 0)}
+                                    config = get_widget_config_dict(sid)
+                                    hostname = srv.get("name", sid)
+                                    new = alert_service.check_metrics(hostname, sid, hostname, metrics, config)
+                                    alerts.extend(new)
+                                else:
+                                    # Offline check
+                                    config = get_widget_config_dict(sid)
+                                    if config.get("alertOfflineEnabled", True):
+                                        alert_key = f"{sid}|Offline"
+                                        if alert_service.should_trigger(alert_key):
+                                            alert_service.mark_triggered(alert_key)
+                                            alerts.append({
+                                                "widget_id": sid,
+                                                "widget_title": f"Server Status ({srv.get('name', sid)})",
+                                                "metric": "Доступность",
+                                                "value": 0,
+                                                "threshold": 0,
+                                                "unit": "",
+                                                "description": f"Server Status ({srv.get('name', sid)}): сервер НЕДОСТУПЕН (Offline)."
+                                            })
+                except Exception as e:
+                    logger.warning(f"Background server-status check failed: {e}")
+
+                # Check Docker (stopped containers)
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(f"{base_url}/api/docker", timeout=10)
+                        if resp.status_code == 200:
+                            raw = resp.json()
+                            if isinstance(raw, dict):
+                                docker_alerts = raw.get("alerts", [])
+                                alerts.extend(docker_alerts)
+                except Exception as e:
+                    logger.warning(f"Background docker check failed: {e}")
+
+                # Check Sites (offline sites)
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(f"{base_url}/api/site-status", timeout=10)
+                        if resp.status_code == 200:
+                            raw = resp.json()
+                            if isinstance(raw, dict):
+                                site_alerts = raw.get("alerts", [])
+                                alerts.extend(site_alerts)
+                except Exception as e:
+                    logger.warning(f"Background sites check failed: {e}")
+
+                if alerts:
+                    await alert_service.send_webhook(alerts)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Background alert loop error: {e}")
+
+    async def main():
+        loop = asyncio.get_running_loop()
+        loop.create_task(background_alert_loop())
+        config = uvicorn.Config(app, host=HOST, port=PORT, log_level="info" if PORT != 9090 else "warning")
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    asyncio.run(main())

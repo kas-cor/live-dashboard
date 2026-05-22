@@ -23,7 +23,6 @@ class SysLoadWidget extends BaseWidget {
       { key: 'alertDiskEnabled', label: 'Следить за Disk', type: 'checkbox' },
       { key: 'alertDiskThreshold', label: 'Порог Disk (%)', type: 'range', min: 50, max: 100, step: 1 }
     ];
-    this._alerted = {}; // track already-alerted metrics to avoid spam per session
   }
 
   render() {
@@ -98,35 +97,11 @@ class SysLoadWidget extends BaseWidget {
 
     this.element.querySelector('.last-update').textContent = new Date().toLocaleTimeString();
 
-    // --- Alert checks ---
-    if (!window.alertManager) return;
-    this._checkAlert('CPU', cpuVal, 'alertCpuEnabled', 'alertCpuThreshold', hostname);
-    this._checkAlert('RAM', ramVal, 'alertRamEnabled', 'alertRamThreshold', hostname);
-    this._checkAlert('Disk', diskVal, 'alertDiskEnabled', 'alertDiskThreshold', hostname);
-  }
-
-  _checkAlert(metricName, value, enabledKey, thresholdKey, hostname) {
-    const enabled = this.getConfig(enabledKey, false);
-    if (!enabled) return;
-    const threshold = this.getConfig(thresholdKey, 90);
-    if (value > threshold) {
-      // Only fire once per session per metric
-      const key = this.id + '-' + metricName;
-      if (this._alerted[key]) return;
-      this._alerted[key] = true;
-      window.alertManager.trigger({
-        widgetId: this.id,
-        widgetTitle: 'System Load (' + hostname + ')',
-        metric: metricName,
-        value: value,
-        threshold: threshold,
-        unit: '%',
-        description: 'System Load (' + hostname + '): ' + metricName + ' \u0434\u043E\u0441\u0442\u0438\u0433 ' + value + '% (\u043F\u043E\u0440\u043E\u0433: ' + threshold + '%).\n\u041F\u0440\u0435\u0432\u044B\u0448\u0435\u043D\u0438\u0435 \u043D\u0430 ' + (value - threshold).toFixed(0) + '%.'
-      });
-    } else {
-      // Reset alert flag when value drops below threshold
-      const key = this.id + '-' + metricName;
-      delete this._alerted[key];
+    // --- Server-side alerts: backend checks thresholds, we only display ---
+    if (window.alertManager && d.alerts && d.alerts.length > 0) {
+      for (const alert of d.alerts) {
+        window.alertManager.trigger(alert);
+      }
     }
   }
 }

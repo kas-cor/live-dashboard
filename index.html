@@ -81,17 +81,10 @@
         interval: 60000,
         apiUrl: API + '/api/site-status',
         title: '🌐 Sites',
-        sites: ['https://example-site.local', 'https://example-site-2.local']
       }));
 
       // Row 6: logs (scrollable)
-      const logsWidget = new LogsWidget('logs', { size: 'large', interval: 5000, apiUrl: API + '/api/logs', lines: 30, service: 'system' });
-      logsWidget._origRender = logsWidget.render;
-      logsWidget.render = function() {
-        this._origRender();
-        if (this.element) this.element.classList.add('widget-scroll');
-      };
-      dashboard.register(logsWidget);
+      dashboard.register(new LogsWidget('logs', { size: 'large', interval: 5000, apiUrl: API + '/api/logs', lines: 30 }));
     });
   </script>
 </body>

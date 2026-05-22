@@ -6,9 +6,7 @@ class NetworkWidget extends BaseWidget {
     this._defaultConfig = {
       pingTarget: 'self',
       historyPoints: 60,
-      showPingValue: true,
-      alertPingEnabled: true,
-      alertPingThreshold: 5000
+      showPingValue: true
     };
     this._configSchema = [
       { key: 'pingTarget', label: 'Ping target', type: 'select', options: [
@@ -17,12 +15,8 @@ class NetworkWidget extends BaseWidget {
         { value: 'cf', label: 'Cloudflare (1.1.1.1)' }
       ]},
       { key: 'historyPoints', label: 'History points', type: 'number', min: 10, max: 120, step: 10 },
-      { key: 'showPingValue', label: 'Show ping number', type: 'checkbox' },
-      { key: '_alertSection', label: '\u041C\u043E\u043D\u0438\u0442\u043E\u0440\u0438\u043D\u0433 \u043A\u0440\u0438\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0445 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0439', type: 'section' },
-      { key: 'alertPingEnabled', label: '\u0421\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u0432\u0440\u0435\u043C\u0435\u043D\u0435\u043C \u043E\u0442\u043A\u043B\u0438\u043A\u0430', type: 'checkbox' },
-      { key: 'alertPingThreshold', label: '\u041F\u043E\u0440\u043E\u0433 (ms)', type: 'number', min: 100, max: 30000, step: 100 }
+      { key: 'showPingValue', label: 'Show ping number', type: 'checkbox' }
     ];
-    this._alerted = false;
   }
 
   render() {
@@ -62,27 +56,6 @@ class NetworkWidget extends BaseWidget {
     if (bigVal) bigVal.style.display = showPing ? '' : 'none';
     if(pingEl) pingEl.textContent = ping;
     this.drawSparkline();
-
-    // --- Alert: ping threshold ---
-    if (window.alertManager && this.getConfig('alertPingEnabled', false)) {
-      const threshold = this.getConfig('alertPingThreshold', 5000);
-      if (ping > threshold) {
-        if (!this._alerted) {
-          this._alerted = true;
-          window.alertManager.trigger({
-            widgetId: this.id,
-            widgetTitle: 'Network',
-            metric: 'Ping',
-            value: ping,
-            threshold: threshold,
-            unit: 'ms',
-            description: 'Network: \u0432\u0440\u0435\u043C\u044F \u043E\u0442\u043A\u043B\u0438\u043A\u0430 ' + ping + 'ms (\u043F\u043E\u0440\u043E\u0433: ' + threshold + 'ms).\n\u041F\u0440\u0435\u0432\u044B\u0448\u0435\u043D\u0438\u0435 \u043D\u0430 ' + (ping - threshold) + 'ms.'
-          });
-        }
-      } else {
-        this._alerted = false;
-      }
-    }
   }
 
   drawSparkline() {
