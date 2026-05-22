@@ -14,14 +14,14 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /var/log:/host/log:ro
-      - ${HOME}/.hermes/todo:/host/todo:ro
+      - ${TODO_HOST_PATH}:/host/todo:ro
       - /run/tailscale:/var/run/tailscale:ro
       - ${HOME}/.ssh:/root/.ssh:ro
       - dashboard-data:/data
     environment:
       - HOST_PROC=/host/proc
       - HOST_SYS=/host/sys
-      - BACKEND_HOSTNAME=host
+      - BACKEND_HOSTNAME=${BACKEND_HOSTNAME:-host}
     networks:
       - dashboard-net
     cap_add:
