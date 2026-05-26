@@ -1,131 +1,89 @@
 # Live Dashboard
 
-Модульный дашборд для второго монитора с киберпанк-темой. 10 виджетов + легкое добавление новых.
+[![License](https://img.shields.io/github/license/kas-cor/live-dashboard)](LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-kas--cor/live-dashboard-181717?logo=github)](https://github.com/kas-cor/live-dashboard)
 
-## Пересборка и деплой
+> 🌐 [Русская версия](README_ru.md)
 
-Для удобной пересборки всего проекта (frontend + backend, с очисткой кеша и пересозданием контейнеров) используйте:
+A **modular dashboard for a second monitor** with a cyberpunk theme. Features 10+ real-time widgets, FastAPI backend, Docker Compose deployment, and an **alert webhook system** that sends threshold-based notifications to AI agents.
 
-```bash
-cd /projects/dashboard
-./rebuild.sh      # или: make rebuild
-```
+## Features
 
-Команда выполняет:
-1. `docker compose build --no-cache` — полная пересборка всех образов
-2. `docker compose up -d --force-recreate` — пересоздание и запуск контейнеров
-3. Выводит статус контейнеров и версию встроенного фронтенда
+- 🕐 **10+ widgets** — Clock, Weather, Crypto, Network, System Load, Server Status, Sites, TODO, Docker, Tailscale, Logs
+- 🤖 **Alert webhook** — automatic notifications when CPU/RAM/disk exceed thresholds, servers go offline, containers stop, sites become unreachable
+- 🖥️ **Remote server monitoring** — SSH-based metrics collection for any number of servers
+- 🐳 **Docker Compose** — one-command deployment
+- 🌗 **Cyberpunk theme** — dark, neon-cyber aesthetic for the second monitor
+- 📦 **Plugin widgets** — easy to add new widgets via `BaseWidget` class
 
-### Makefile — целевые команды
-
-```bash
-make rebuild        # полная пересборка и перезапуск (через rebuild.sh)
-make up             # поднять контейнеры
-make down           # остановить контейнеры
-make logs           # логи всех сервисов
-make backend-logs   # логи бэкенда
-make frontend-logs  # логи фронтенда
-make status         # статус контейнеров
-```
-
-**Пересборка только frontend** (если меняли JS/CSS/HTML):
-```bash
-docker compose build --no-cache frontend
-docker stop dashboard-frontend && docker rm dashboard-frontend
-docker compose up -d frontend
-```
-
-**Пересборка только backend** (если меняли backend.py или .env):
-```bash
-docker compose build --no-cache backend
-docker stop dashboard-backend && docker rm dashboard-backend
-docker compose up -d backend
-```
-
-## Запуск (Docker Compose)
+## Quick Start
 
 ```bash
-cd /projects/dashboard
+git clone https://github.com/kas-cor/live-dashboard.git
+cd live-dashboard
+cp .env.sample .env
+# Edit .env with your settings
 docker compose up -d
+# Open http://localhost:3003
 ```
 
-Открой `http://localhost:3003` на втором мониторе.
+## Built-in Widgets
 
-**Сервисы:**
-- Frontend (nginx): `localhost:3003` — дашборд + proxy `/api/*`
-- Backend (FastAPI): `localhost:9090` — API endpoints
+| Widget | Refresh | Source | Description |
+|--------|---------|--------|-------------|
+| Clock | 1s | Local | Time display |
+| Weather | 5min | Open-Meteo API | Temperature, humidity, wind, forecast |
+| Crypto | 1min | CoinGecko API | BTC/ETH/XMR prices + 24h change |
+| Network | 2s | HTTP HEAD | Online status check |
+| System Load | 3s | FastAPI | CPU, RAM, Disk, uptime, load |
+| Server Status | 15s | SSH | Remote server metrics |
+| Sites | 1min | HTTP GET | Website uptime monitoring |
+| TODO | 30s | JSON file | Task list |
+| Docker | 10s | Docker socket | Container statuses |
+| Tailscale | 15s | Tailscale CLI | Network peers |
+| Logs | 5s | journalctl | System logs (scrollable) |
 
-**Пересборка после изменений:**
+## Alert Webhook for AI Agents
+
+The backend runs a background alert loop that checks system metrics and sends webhooks when thresholds are exceeded:
+
+- **CPU > 90%**, RAM > 90%, Disk > 90%
+- **Docker containers stopped**
+- **Remote servers offline**
+- **Monitored websites unreachable**
+
+Configure in `.env`:
 ```bash
-docker compose up -d --build
+ALERT_WEBHOOK_URL=https://your-agent-endpoint/webhook
+ALERT_WEBHOOK_AUTH_TOKEN=your-token
+ALERT_COOLDOWN_MINUTES=10
 ```
 
-## Архитектура
+## Management
 
+```bash
+make rebuild        # Full rebuild + restart
+make up             # Start containers
+make down           # Stop containers
+make logs           # All logs
+make status         # Container status
 ```
-assets/js/core.js          — Dashboard + BaseWidget
-assets/js/widgets/*.js     — плагины
-assets/css/dashboard.css   — единая тема
-api/servers.json           — мок для серверов
-backend.py                 — FastAPI с 7 endpoints
-```
 
-## Как добавить виджет
-
-1. Создай `assets/js/widgets/mywidget.js`:
+## Adding a Widget
 
 ```javascript
 class MyWidget extends BaseWidget {
-  constructor(id, options) {
-    super(id, options);
-    this.size = 'medium'; // small | medium | large
-  }
-
-  render() {
-    // this.element уже создан — заполни HTML
-    this.element.innerHTML = `
-      <div class="widget-header"><h3>Title</h3></div>
-      <div class="widget-body">...</div>
-    `;
-  }
-
-  async update() {
-    // Получи данные, обнови DOM
-    // this.element.querySelector('.value').textContent = 42;
-  }
+  constructor(id, options) { super(id, options); this.size = 'medium'; }
+  render() { this.element.innerHTML = `<div>...</div>`; }
+  async update() { /* fetch and update */ }
 }
 window.MyWidget = MyWidget;
 ```
 
-2. Подключи в `index.html`.
-3. Зарегистрируй: `dashboard.register(new MyWidget('id', { interval: 5000 }))`.
+---
 
-Система сама: вызывает `render()` → `update()` → `start(interval)`. При ошибках виджет не ломает соседей.
-
-## Встроенные виджеты
-
-| Виджет | Интервал | Источник |
-|--------|----------|----------|
-| Clock | 1s | Локальный |
-| Weather | 5min | Open-Meteo API |
-| Crypto | 1min | CoinGecko API |
-| Network | 2s | Fetch self HEAD |
-| System Load | 3s | backend /api/sysinfo |
-| Server Status | 5s | backend /api/servers.json |
-| TODO | 30s | backend /api/todo |
-| Docker | 10s | backend /api/docker |
-| Tailscale | 15s | backend /api/tailscale |
-| Logs | 5s | backend /api/logs |
-
-Все системные виджеты работают и с мок-данными при недоступном бэкенде.
-
-## Docker контейнеризация (опционально)
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY backend.py .
-RUN pip install fastapi uvicorn
-EXPOSE 9090
-CMD ["python", "backend.py"]
-```
+<p align="center">
+  <a href="README_ru.md">🌐 Русская версия</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/kas-cor/live-dashboard/issues">🐛 Report a Bug</a>
+</p>
