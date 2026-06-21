@@ -72,7 +72,7 @@ backend/ollama-usage/
 
 ```bash
 python3 /projects/dashboard/backend/ollama-usage/scripts/ollama-usage.py \
-  --save-cookie "YWdlLWVuY3J5cHRpb24ub3JnL3Yx..."
+  --save-cookie "<ваша-__Secure-session-кука>"
 ```
 
 ### 2. Настроить cron
