@@ -12,7 +12,6 @@ class OllamaUsageWidget extends BaseWidget {
       <div class="widget-header">
         <h3>☁️ Ollama Cloud</h3>
         <div class="widget-header-actions">
-          <button class="widget-settings-btn" title="Settings">⚙</button>
           <span class="last-update">--:--</span>
         </div>
       </div>
@@ -49,8 +48,6 @@ class OllamaUsageWidget extends BaseWidget {
         </div>
       </div>
     `;
-    const btn = this.element.querySelector('.widget-settings-btn');
-    if (btn) btn.addEventListener('click', () => this.toggleSettings());
   }
 
   async update() {

@@ -15,6 +15,7 @@ A **modular dashboard for a second monitor** with a cyberpunk theme. Features 10
 - 🐳 **Docker Compose** — one-command deployment
 - 🌗 **Cyberpunk theme** — dark, neon-cyber aesthetic for the second monitor
 - 📦 **Plugin widgets** — easy to add new widgets via `BaseWidget` class
+- 🖱️ **Drag & Drop** — reorder widgets by dragging, order persists in localStorage
 
 ## Quick Start
 

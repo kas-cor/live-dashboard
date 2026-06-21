@@ -568,15 +568,8 @@ class Dashboard {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
     this.widgets = new Map();
-  }
-
-  register(widget) {
-    if (this.widgets.has(widget.id)) {
-      console.warn('Widget "' + widget.id + '" already registered');
-      return;
-    }
-    this.widgets.set(widget.id, widget);
-    widget.mount(this.container);
+    this._dragSrcId = null;
+    this._initDragDrop();
   }
 
   unregister(id) {
@@ -584,6 +577,170 @@ class Dashboard {
     if (widget) {
       widget.destroy();
       this.widgets.delete(id);
+    }
+  }
+
+  // --- Drag & Drop ---
+
+  _initDragDrop() {
+    // Используем делегирование событий на контейнере
+    this.container.addEventListener('dragstart', (e) => this._onDragStart(e));
+    this.container.addEventListener('dragover', (e) => this._onDragOver(e));
+    this.container.addEventListener('drop', (e) => this._onDrop(e));
+    this.container.addEventListener('dragend', (e) => this._onDragEnd(e));
+  }
+
+  _makeDraggable() {
+    // Делаем все виджеты перетаскиваемыми
+    for (const [id, widget] of this.widgets) {
+      if (widget.element) {
+        widget.element.draggable = true;
+      }
+    }
+  }
+
+  _onDragStart(e) {
+    const widgetEl = e.target.closest('.widget');
+    if (!widgetEl) return;
+    this._dragSrcId = widgetEl.id.replace('widget-', '');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', this._dragSrcId);
+    // Добавляем класс для визуального эффекта
+    setTimeout(() => widgetEl.classList.add('widget-dragging'), 0);
+  }
+
+  _onDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    // Убираем все индикаторы со всех виджетов
+    this.container.querySelectorAll('.widget-drop-before, .widget-drop-after').forEach(el => {
+      el.classList.remove('widget-drop-before', 'widget-drop-after');
+    });
+
+    const widgetEl = e.target.closest('.widget');
+    if (!widgetEl) return;
+    const targetId = widgetEl.id.replace('widget-', '');
+    if (targetId === this._dragSrcId) return;
+
+    // Определяем, куда вставить: выше или ниже середины
+    const rect = widgetEl.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    if (e.clientY < midY) {
+      widgetEl.classList.add('widget-drop-before');
+    } else {
+      widgetEl.classList.add('widget-drop-after');
+    }
+  }
+
+  _onDrop(e) {
+    e.preventDefault();
+    // Убираем все индикаторы
+    this.container.querySelectorAll('.widget-drop-before, .widget-drop-after').forEach(el => {
+      el.classList.remove('widget-drop-before', 'widget-drop-after');
+    });
+
+    const widgetEl = e.target.closest('.widget');
+    if (!widgetEl || !this._dragSrcId) return;
+
+    const targetId = widgetEl.id.replace('widget-', '');
+    if (targetId === this._dragSrcId) return;
+
+    const srcWidget = this.widgets.get(this._dragSrcId);
+    const targetWidget = this.widgets.get(targetId);
+    if (!srcWidget || !targetWidget || !srcWidget.element || !targetWidget.element) return;
+
+    // Определяем позицию вставки
+    const rect = widgetEl.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const insertBefore = e.clientY < midY;
+
+    // Перемещаем DOM-элемент
+    if (insertBefore) {
+      this.container.insertBefore(srcWidget.element, targetWidget.element);
+    } else {
+      this.container.insertBefore(srcWidget.element, targetWidget.element.nextSibling);
+    }
+
+    // Сохраняем порядок
+    this._saveOrder();
+  }
+
+  _onDragEnd(e) {
+    this.container.querySelectorAll('.widget-dragging, .widget-drop-before, .widget-drop-after').forEach(el => {
+      el.classList.remove('widget-dragging', 'widget-drop-before', 'widget-drop-after');
+    });
+    this._dragSrcId = null;
+  }
+
+  _saveOrder() {
+    const order = [];
+    const children = this.container.children;
+    for (let i = 0; i < children.length; i++) {
+      const el = children[i];
+      if (el.classList.contains('widget')) {
+        const id = el.id.replace('widget-', '');
+        order.push(id);
+      }
+    }
+    try {
+      localStorage.setItem('dashboard-widget-order', JSON.stringify(order));
+    } catch(e) {}
+  }
+
+  _restoreOrder() {
+    try {
+      const saved = localStorage.getItem('dashboard-widget-order');
+      if (!saved) return;
+      const order = JSON.parse(saved);
+      if (!Array.isArray(order) || order.length === 0) return;
+
+      // Собираем элементы в нужном порядке
+      const fragment = document.createDocumentFragment();
+      for (const id of order) {
+        const widget = this.widgets.get(id);
+        if (widget && widget.element && widget.element.parentNode === this.container) {
+          fragment.appendChild(widget.element);
+        }
+      }
+      // Добавляем оставшиеся (новые) виджеты в конец
+      const remaining = [];
+      const children = this.container.children;
+      for (let i = 0; i < children.length; i++) {
+        const el = children[i];
+        if (el.classList.contains('widget') && !fragment.contains(el)) {
+          remaining.push(el);
+        }
+      }
+      for (const el of remaining) {
+        fragment.appendChild(el);
+      }
+      if (fragment.children.length > 0) {
+        this.container.appendChild(fragment);
+      }
+    } catch(e) {}
+  }
+
+  // Переопределяем register, чтобы после монтирования восстановить порядок
+  // и сделать виджеты перетаскиваемыми
+  register(widget) {
+    if (this.widgets.has(widget.id)) {
+      console.warn('Widget "' + widget.id + '" already registered');
+      return;
+    }
+    this.widgets.set(widget.id, widget);
+    widget.mount(this.container);
+
+    // После монтирования всех виджетов восстанавливаем порядок
+    // Используем requestAnimationFrame, чтобы дать браузеру отрисовать
+    if (this.widgets.size === 1) {
+      // Первый виджет — отложим восстановление
+      requestAnimationFrame(() => {
+        this._restoreOrder();
+        this._makeDraggable();
+      });
+    } else {
+      this._makeDraggable();
     }
   }
 }

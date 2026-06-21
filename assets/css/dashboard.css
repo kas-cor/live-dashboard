@@ -96,6 +96,32 @@ body::before {
   transform: translateY(-2px);
 }
 
+/* Drag & Drop */
+.widget {
+  cursor: grab;
+  user-select: none;
+}
+
+.widget:active {
+  cursor: grabbing;
+}
+
+.widget-dragging {
+  opacity: 0.4;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 20px var(--hover-glow) !important;
+}
+
+.widget-drop-before {
+  border-top: 3px solid var(--accent) !important;
+  margin-top: -1px;
+}
+
+.widget-drop-after {
+  border-bottom: 3px solid var(--accent) !important;
+  margin-bottom: -1px;
+}
+
 .widget::before {
   content: '';
   position: absolute;
