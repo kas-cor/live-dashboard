@@ -91,11 +91,11 @@ make status         # Container status
 │   └── ollama-usage.json     — Ollama Cloud usage data
 ├── index.html                — dashboard entry point
 ├── docker-compose.yml        — orchestration
-├── Dockerfile.backend        — backend image
-├── Dockerfile.frontend       — frontend image
+├── Dockerfile                — unified image (nginx + Python)
 ├── nginx.conf                — nginx config (proxies /api/* → backend)
-├── Makefile                  — target commands
-└── rebuild.sh                — full rebuild
+├── entrypoint.sh             — container entrypoint
+└── data/                     — JSON files for widgets (written externally)
+    └── ollama-usage.json     — Ollama Cloud usage data
 ```
 
 ## Adding a Widget

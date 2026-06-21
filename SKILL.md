@@ -118,9 +118,7 @@ ALERT_WEBHOOK_AUTH_TOKEN=your-auth-token
 
 ### 4. Rebuild After Changes
 ```bash
-./rebuild.sh       # Full rebuild (no-cache + recreate)
-# or
-make rebuild       # Same via Makefile
+docker compose build && docker compose up -d
 ```
 
 ---
@@ -259,28 +257,12 @@ All widgets gracefully fall back to mock data when the backend is unavailable.
 
 ## 🛠 Management Commands
 
-### Makefile Targets
 ```bash
-make rebuild        # Full rebuild + restart
-make up             # Start containers
-make down           # Stop containers
-make logs           # All logs
-make backend-logs   # Backend logs only
-make frontend-logs  # Frontend logs only
-make status         # Container status
-```
-
-### Selective Rebuild
-```bash
-# Frontend only (JS/CSS/HTML changes)
-docker compose build --no-cache frontend
-docker stop dashboard-frontend && docker rm dashboard-frontend
-docker compose up -d frontend
-
-# Backend only (backend.py or .env changes)
-docker compose build --no-cache backend
-docker stop dashboard-backend && docker rm dashboard-backend
-docker compose up -d backend
+docker compose build && docker compose up -d   # Full rebuild + restart
+docker compose up -d                           # Start container
+docker compose down                            # Stop container
+docker compose logs -f                         # All logs
+docker compose ps                              # Container status
 ```
 
 ---
@@ -303,13 +285,10 @@ live-dashboard/
 │   ├── js/core.js            ← Dashboard + BaseWidget class
 │   └── js/widgets/           ← Plugin widgets (clock, weather, etc.)
 │
-├── Dockerfile.backend    ← Python backend image
-├── Dockerfile.frontend   ← nginx frontend image
-├── docker-compose.yml    ← Service orchestration
-├── nginx.conf            ← HTTP nginx config
-├── nginx.ssl.conf        ← HTTPS nginx config
-├── rebuild.sh            ← Full rebuild script
-├── Makefile              ← Management targets
+├── Dockerfile              ← Unified image (nginx + Python)
+├── docker-compose.yml      ← Service orchestration
+├── nginx.conf              ← HTTP nginx config
+├── entrypoint.sh           ← Container entrypoint
 └── .gitignore
 ```
 

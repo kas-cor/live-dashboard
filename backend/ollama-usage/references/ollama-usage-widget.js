@@ -129,11 +129,27 @@ class OllamaUsageWidget extends BaseWidget {
       }).join('');
     }
 
-    // Subscription end date
+    // Subscription countdown (only for non-free plans)
     const subEl = body.querySelector('.ollama-subscription');
     if (subEl) {
-      if (d.subscription && d.subscription.ends_at_formatted) {
-        subEl.textContent = 'Subscription ends: ' + d.subscription.ends_at_formatted;
+      if (plan !== 'free' && d.subscription && d.subscription.ends_at_formatted && d.subscription.ends_at) {
+        const now = new Date();
+        const end = new Date(d.subscription.ends_at + 'T23:59:59Z');
+        const diff = end - now;
+        if (diff > 0) {
+          const days = Math.floor(diff / 86400000);
+          const hours = Math.floor((diff % 86400000) / 3600000);
+          const mins = Math.floor((diff % 3600000) / 60000);
+          let countdown = '';
+          if (days > 0) {
+            countdown = ` (${days}d ${hours}h ${mins}m)`;
+          } else {
+            countdown = ` (${hours}h ${mins}m)`;
+          }
+          subEl.textContent = 'Subscription ends: ' + d.subscription.ends_at_formatted + countdown;
+        } else {
+          subEl.textContent = '';
+        }
       } else {
         subEl.textContent = '';
       }

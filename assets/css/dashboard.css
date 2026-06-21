@@ -97,12 +97,12 @@ body::before {
 }
 
 /* Drag & Drop */
-.widget {
+.widget-header {
   cursor: grab;
   user-select: none;
 }
 
-.widget:active {
+.widget-header:active {
   cursor: grabbing;
 }
 

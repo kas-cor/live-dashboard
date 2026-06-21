@@ -591,20 +591,33 @@ class Dashboard {
   }
 
   _makeDraggable() {
-    // Делаем все виджеты перетаскиваемыми
+    // Делаем заголовки виджетов перетаскиваемыми
     for (const [id, widget] of this.widgets) {
       if (widget.element) {
-        widget.element.draggable = true;
+        const header = widget.element.querySelector('.widget-header');
+        if (header) {
+          header.draggable = true;
+        }
       }
     }
   }
 
   _onDragStart(e) {
-    const widgetEl = e.target.closest('.widget');
+    const headerEl = e.target.closest('.widget-header');
+    if (!headerEl) {
+      e.preventDefault();
+      return;
+    }
+    const widgetEl = headerEl.closest('.widget');
     if (!widgetEl) return;
     this._dragSrcId = widgetEl.id.replace('widget-', '');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', this._dragSrcId);
+
+    // Устанавливаем drag image как весь виджет (а не только заголовок)
+    const rect = widgetEl.getBoundingClientRect();
+    e.dataTransfer.setDragImage(widgetEl, e.clientX - rect.left, e.clientY - rect.top);
+
     // Добавляем класс для визуального эффекта
     setTimeout(() => widgetEl.classList.add('widget-dragging'), 0);
   }
@@ -650,16 +663,19 @@ class Dashboard {
     const targetWidget = this.widgets.get(targetId);
     if (!srcWidget || !targetWidget || !srcWidget.element || !targetWidget.element) return;
 
-    // Определяем позицию вставки
-    const rect = widgetEl.getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    const insertBefore = e.clientY < midY;
+    const srcEl = srcWidget.element;
+    const tgtEl = targetWidget.element;
 
-    // Перемещаем DOM-элемент
-    if (insertBefore) {
-      this.container.insertBefore(srcWidget.element, targetWidget.element);
+    // Меняем местами: определяем, кто из них раньше в DOM
+    const srcIndex = Array.prototype.indexOf.call(this.container.children, srcEl);
+    const tgtIndex = Array.prototype.indexOf.call(this.container.children, tgtEl);
+
+    if (srcIndex < tgtIndex) {
+      // src выше — вставляем tgt перед src (src уходит вниз)
+      this.container.insertBefore(tgtEl, srcEl);
     } else {
-      this.container.insertBefore(srcWidget.element, targetWidget.element.nextSibling);
+      // tgt выше — вставляем src перед tgt (tgt уходит вниз)
+      this.container.insertBefore(srcEl, tgtEl);
     }
 
     // Сохраняем порядок

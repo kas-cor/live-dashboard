@@ -1,14 +1,14 @@
 services:
-  backend:
+  dashboard:
     build:
       context: .
-      dockerfile: Dockerfile.backend
-    container_name: dashboard-backend
+      dockerfile: Dockerfile
+    container_name: dashboard
     restart: unless-stopped
     env_file:
       - .env
     ports:
-      - "${BACKEND_HOST:-127.0.0.1}:${BACKEND_PORT:-9090}:${BACKEND_PORT:-9090}"
+      - "${DASHBOARD_HOST:-127.0.0.1}:${DASHBOARD_PORT:-3003}:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host/proc:ro
@@ -23,35 +23,8 @@ services:
       - HOST_PROC=/host/proc
       - HOST_SYS=/host/sys
       - BACKEND_HOSTNAME=${BACKEND_HOSTNAME:-host}
-    networks:
-      - dashboard-net
-    healthcheck:
-      test: ["CMD-SHELL", "test -S /var/run/tailscale/tailscaled.sock"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
     cap_add:
       - SYS_PTRACE
-
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    container_name: dashboard-frontend
-    restart: unless-stopped
-    env_file:
-      - .env
-    ports:
-      - "${DASHBOARD_HOST:-127.0.0.1}:${DASHBOARD_PORT:-3003}:8080"
-    depends_on:
-      - backend
-    networks:
-      - dashboard-net
-
-networks:
-  dashboard-net:
-    driver: bridge
 
 volumes:
   dashboard-data:

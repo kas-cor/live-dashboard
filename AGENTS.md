@@ -155,7 +155,8 @@ ALERT_COOLDOWN_MINUTES=10
 
 ## Build
 ```bash
-./rebuild.sh              # Full rebuild
-make rebuild              # Same
-make up / down / logs     # Container management
+docker compose build && docker compose up -d   # Full rebuild + restart
+docker compose up -d                           # Start
+docker compose down                            # Stop
+docker compose logs -f                         # Logs
 ```

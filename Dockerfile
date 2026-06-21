@@ -1,8 +1,8 @@
 FROM python:3.11-slim
 
-# Install Docker CLI from static binary + openssh-client for server monitoring + tailscale
+# Install nginx + Docker CLI + tailscale + openssh-client
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl openssh-client kmod procps systemd && \
+    ca-certificates curl openssh-client kmod procps systemd nginx && \
     rm -rf /var/lib/apt/lists/* && \
     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz -o /tmp/docker.tgz && \
     tar xzf /tmp/docker.tgz -C /tmp/ && \
@@ -18,9 +18,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tailscale version
 
 WORKDIR /app
+
+# Python deps
 RUN pip install --no-cache-dir fastapi uvicorn python-dotenv httpx
 
+# Backend
 COPY backend.py .
 
-EXPOSE 9090
-CMD ["python", "backend.py"]
+# Frontend
+COPY assets/ /usr/share/nginx/html/assets/
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Auto cache-buster: hash all assets and inject into index.html
+COPY index.html /tmp/index.html
+RUN HASH=$(find /usr/share/nginx/html/assets -type f -exec md5sum {} \; | sort | md5sum | cut -c1-8) && \
+    sed -i "s/__CACHEBUSTER__/$HASH/g" /tmp/index.html && \
+    echo "Cache-buster hash: $HASH" && \
+    cp /tmp/index.html /usr/share/nginx/html/index.html && \
+    chown -R www-data:www-data /usr/share/nginx/html && chmod -R 755 /usr/share/nginx/html
+
+# Entrypoint: start nginx, then run backend
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8080
+CMD ["/entrypoint.sh"]
