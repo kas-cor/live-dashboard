@@ -17,6 +17,7 @@ services:
       - ${TODO_HOST_PATH}:/host/todo:ro
       - /run/tailscale:/var/run/tailscale:ro
       - ${HOME}/.ssh:/root/.ssh:ro
+      - /projects/dashboard/data:/ollama-data:ro
       - dashboard-data:/data
     environment:
       - HOST_PROC=/host/proc
@@ -24,6 +25,12 @@ services:
       - BACKEND_HOSTNAME=${BACKEND_HOSTNAME:-host}
     networks:
       - dashboard-net
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/tailscale/tailscaled.sock"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     cap_add:
       - SYS_PTRACE
     healthcheck:

@@ -28,6 +28,7 @@
   <script src="assets/js/widgets/docker.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/tailscale.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/logs.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/ollama-usage.js?v=__CACHEBUSTER__"></script>
 
   <!-- Theme toggle -->
   <script src="assets/js/widgets/theme-toggle.js"></script>
@@ -67,15 +68,23 @@
         title: '📞 Asterisk'
       }));
 
-      // Row 3: sysload + todo
+      // Row 3: sysload + ollama cloud usage
       dashboard.register(new SysLoadWidget('sysload', { size: 'medium', interval: 3000, apiUrl: API + '/api/sysinfo' }));
+      dashboard.register(new OllamaUsageWidget('ollama-usage', {
+        size: 'medium',
+        interval: 30000,
+        apiUrl: API + '/api/ollama-usage',
+        title: '☁️ Ollama Cloud',
+      }));
+
+      // Row 4: todo
       dashboard.register(new TodoWidget('todo', { size: 'medium', interval: 30000, apiUrl: API + '/api/todo' }));
 
-      // Row 4: docker + tailscale
+      // Row 5: docker + tailscale
       dashboard.register(new DockerWidget('docker', { size: 'medium', interval: 10000, apiUrl: API + '/api/docker' }));
       dashboard.register(new TailscaleWidget('tailscale', { size: 'medium', interval: 15000, apiUrl: API + '/api/tailscale' }));
 
-      // Row 5: site status
+      // Row 6: site status
       dashboard.register(new SitesWidget('sites', {
         size: 'medium',
         interval: 60000,
@@ -83,7 +92,7 @@
         title: '🌐 Sites',
       }));
 
-      // Row 6: logs (scrollable)
+      // Row 7: logs (scrollable)
       dashboard.register(new LogsWidget('logs', { size: 'large', interval: 5000, apiUrl: API + '/api/logs', lines: 30 }));
     });
   </script>

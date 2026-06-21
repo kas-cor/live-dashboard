@@ -425,6 +425,10 @@ def tailscale():
 
         return {"self": self_info, "peers": peers}
     except Exception as e:
+        logger.error(f"Tailscale API error: {e}")
+        ts_sock = os.environ.get("TS_SOCKET","/var/run/tailscale/tailscaled.sock")
+        if not os.path.exists(ts_sock):
+            logger.warning(f"Tailscale socket not found at {ts_sock}")
         return {"self": {"name":"dashboard-node","ip":""},
                 "peers": []}
 
@@ -821,6 +825,25 @@ def get_site_status():
         return {"sites": results, "alerts": site_alerts}
     return {"sites": results, "alerts": []}
 
+
+# --- Ollama Cloud Usage ---
+OLLAMA_USAGE_FILE = os.environ.get("OLLAMA_USAGE_FILE", "/ollama-data/ollama-usage.json")
+
+@app.get("/api/ollama-usage")
+def ollama_usage():
+    """Возвращает данные об использовании Ollama Cloud из JSON-файла."""
+    try:
+        with open(OLLAMA_USAGE_FILE) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"error": "no_data", "plan": "unknown",
+                "session": {"percent": 0, "resets_at": None, "models": []},
+                "weekly": {"percent": 0, "resets_at": None, "models": []},
+                "fetched_at": None}
+
+    return data
+
+
 # --- Alert Webhook Config ---
 @app.get("/api/alert-config")
 def get_alert_config():
@@ -856,7 +879,7 @@ async def trigger_alert(payload: AlertPayload):
 
     headers = {"Content-Type": "application/json"}
     if auth_token:
-        headers["Authorization"] = "Bearer " + auth_token
+        headers["Authorization"] = f"Bearer {auth_token}"
 
     try:
         async with httpx.AsyncClient() as client:

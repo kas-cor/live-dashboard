@@ -812,3 +812,124 @@ body::before {
   box-shadow: 0 4px 20px rgba(255, 0, 85, 0.4);
 }
 
+/* ── Ollama Cloud Usage Widget ────────────────── */
+.ollama-card {
+  padding: 8px 0;
+}
+
+.ollama-plan-line {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ollama-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ollama-resets {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ollama-metric-block {
+  margin-bottom: 6px;
+}
+
+.ollama-metric-block:last-child {
+  margin-bottom: 10px;
+}
+
+.ollama-metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+
+.ollama-metric-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ollama-metric-reset {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.models-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.model-name {
+  flex: 0 0 auto;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.model-bar-track {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.model-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+.model-reqs {
+  flex: 0 0 40px;
+  text-align: right;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+}
+
+.ollama-subscription {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
