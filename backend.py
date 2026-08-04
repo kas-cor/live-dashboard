@@ -3,13 +3,13 @@
 Dashboard Backend API
 Provides system data for the dashboard widgets
 """
-import subprocess, json, os, time, re, sqlite3, shlex, threading
+import subprocess, json, os, time, re, sqlite3, threading
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import asyncio
 import datetime
 import logging
@@ -986,9 +986,6 @@ def get_alert_config():
 
 
 # --- Alert Webhook Trigger ---
-from pydantic import BaseModel
-from typing import List
-
 class AlertMessage(BaseModel):
     type: str = 'alert'
     timestamp: str = None
