@@ -29,6 +29,7 @@
   <script src="assets/js/widgets/tailscale.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/logs.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/ollama-usage.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/promotions.js?v=__CACHEBUSTER__"></script>
 
   <!-- Theme toggle -->
   <script src="assets/js/widgets/theme-toggle.js"></script>
@@ -92,7 +93,15 @@
         title: '🌐 Sites',
       }));
 
-      // Row 7: logs (scrollable)
+      // Row 7: promotions
+      dashboard.register(new PromotionsWidget('promotions', {
+        size: 'medium',
+        interval: 60000,
+        apiUrl: API + '/api/promotions',
+        title: '🏷️ Акции',
+      }));
+
+      // Row 8: logs (scrollable)
       dashboard.register(new LogsWidget('logs', { size: 'large', interval: 5000, apiUrl: API + '/api/logs', lines: 30 }));
     });
   </script>

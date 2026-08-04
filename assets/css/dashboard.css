@@ -959,3 +959,133 @@ body::before {
   text-align: center;
 }
 
+/* ── Promotions Widget ─────────────────────── */
+.promo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.promo-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  transition: border-color 0.2s;
+}
+
+.promo-card:hover {
+  border-color: var(--accent);
+}
+
+.promo-card-expiring {
+  border-color: var(--warning);
+  background: rgba(255,204,0,0.05);
+}
+
+.promo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.promo-brand {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.promo-time {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+}
+
+.promo-time.promo-expiring {
+  color: var(--warning);
+}
+
+.promo-time.promo-week {
+  color: var(--accent);
+}
+
+.promo-time.promo-expired {
+  color: var(--danger);
+}
+
+.promo-description {
+  font-size: 12px;
+  color: var(--text-primary);
+  margin: 2px 0;
+}
+
+.promo-benefit {
+  font-size: 12px;
+  color: var(--success);
+  margin: 2px 0;
+}
+
+.promo-terms {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 4px 0;
+}
+
+.promo-terms summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.promo-terms[open] summary {
+  margin-bottom: 4px;
+}
+
+.promo-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.promo-source {
+  font-size: 10px;
+}
+
+.promo-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 20px;
+  font-size: 13px;
+}
+
+.promo-summary {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.promo-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.promo-link:hover {
+  text-decoration: underline;
+  color: var(--accent-secondary);
+}
+
+.promo-url {
+  margin-top: 4px;
+}
+

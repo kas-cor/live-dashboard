@@ -3,10 +3,11 @@
 Dashboard Backend API
 Provides system data for the dashboard widgets
 """
-import subprocess, json, os, time, re, sqlite3
+import subprocess, json, os, time, re, sqlite3, shlex, threading
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
@@ -26,6 +27,16 @@ PORT = int(os.environ.get('BACKEND_PORT', '9090'))
 app = FastAPI(title="Dashboard API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# --- API Key Auth ---
+DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "").strip()
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def require_api_key(api_key: str = Security(api_key_header)):
+    """Dependency: reject requests without a valid API key when DASHBOARD_API_KEY is set."""
+    if DASHBOARD_API_KEY and api_key != DASHBOARD_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing API key")
+    return api_key
+
 # --- Config DB ---
 DB_PATH = os.environ.get('CONFIG_DB', '/data/dashboard.db')
 
@@ -37,9 +48,23 @@ def get_db():
         CREATE TABLE IF NOT EXISTS alert_cooldowns (
             alert_key TEXT PRIMARY KEY,
             triggered_at REAL NOT NULL,
-            value REAL DEFAULT 0
+            value REAL DEFAULT 0,
+            consecutive_hits INTEGER DEFAULT 0
         )
     """)
+    # Migration: add consecutive_hits column if it doesn't exist (pre-v2 DBs)
+    try:
+        db.execute("ALTER TABLE alert_cooldowns ADD COLUMN consecutive_hits INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    # Migration: fix NULL consecutive_hits from pre-migration rows
+    db.execute("UPDATE alert_cooldowns SET consecutive_hits = 0 WHERE consecutive_hits IS NULL")
+    # Migration: reset stale counters that were incremented before cooldown check was added
+    # Only run once — use a sentinel key
+    sentinel = db.execute("SELECT 1 FROM alert_cooldowns WHERE alert_key = '__migrated_v2'").fetchone()
+    if not sentinel:
+        db.execute("UPDATE alert_cooldowns SET consecutive_hits = 0 WHERE triggered_at = 0 AND consecutive_hits > 0")
+        db.execute("INSERT INTO alert_cooldowns (alert_key, triggered_at, value, consecutive_hits) VALUES ('__migrated_v2', 0, 0, 0)")
     # Seed sites from env if DB empty
     seed = os.environ.get("SITES_SEED", "").strip()
     if seed:
@@ -70,33 +95,113 @@ def get_widget_config_dict(widget_id: str) -> dict:
 # --- Alert Service (server-side threshold checking) ---
 ALERT_CHECK_INTERVAL = int(os.environ.get("ALERT_CHECK_INTERVAL", "60"))
 ALERT_COOLDOWN_SECS = int(os.environ.get("ALERT_COOLDOWN_MINUTES", "10")) * 60
+ALERT_CONSECUTIVE_THRESHOLD = int(os.environ.get("ALERT_CONSECUTIVE_THRESHOLD", "3"))
+ALERT_CONSECUTIVE_TIMEOUT_SECS = int(os.environ.get("ALERT_CONSECUTIVE_TIMEOUT_SECS", "300"))
 
 class AlertService:
+    def __init__(self):
+        self._lock = threading.Lock()
+
+    def _get_row(self, alert_key: str):
+        db = get_db()
+        row = db.execute(
+            "SELECT triggered_at, value, consecutive_hits FROM alert_cooldowns WHERE alert_key = ?",
+            (alert_key,)
+        ).fetchone()
+        db.close()
+        return row
+
+    def _upsert(self, alert_key: str, triggered_at: float, value: float, consecutive_hits: int):
+        db = get_db()
+        db.execute(
+            "INSERT OR REPLACE INTO alert_cooldowns (alert_key, triggered_at, value, consecutive_hits) VALUES (?, ?, ?, ?)",
+            (alert_key, triggered_at, value, consecutive_hits)
+        )
+        db.commit()
+        db.close()
+
+    def _delete(self, alert_key: str):
+        db = get_db()
+        db.execute("DELETE FROM alert_cooldowns WHERE alert_key = ?", (alert_key,))
+        db.commit()
+        db.close()
+
     def should_trigger(self, alert_key: str) -> bool:
         now = time.time()
-        db = get_db()
-        row = db.execute("SELECT triggered_at FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
-        db.close()
+        row = self._get_row(alert_key)
         if row:
             if now - row["triggered_at"] < ALERT_COOLDOWN_SECS:
                 return False
         return True
 
     def mark_triggered(self, alert_key: str):
-        now = time.time()
-        db = get_db()
-        db.execute(
-            "INSERT OR REPLACE INTO alert_cooldowns (alert_key, triggered_at, value) VALUES (?, ?, ?)",
-            (alert_key, now, 0)
-        )
-        db.commit()
-        db.close()
+        self._upsert(alert_key, time.time(), 0, 0)
 
     def reset_cooldown(self, alert_key: str):
-        db = get_db()
-        db.execute("DELETE FROM alert_cooldowns WHERE alert_key = ?", (alert_key,))
-        db.commit()
-        db.close()
+        self._delete(alert_key)
+
+    def _increment_consecutive(self, alert_key: str) -> tuple[bool, int]:
+        """Increment consecutive counter atomically. Returns (should_alert, current_count)."""
+        with self._lock:
+            now = time.time()
+            db = get_db()
+
+            # Check cooldown first
+            row = db.execute(
+                "SELECT triggered_at, value, consecutive_hits FROM alert_cooldowns WHERE alert_key = ?",
+                (alert_key,)
+            ).fetchone()
+
+            in_cooldown = False
+            if row:
+                triggered_at = row["triggered_at"]
+                if triggered_at and triggered_at > 0 and (now - triggered_at) < ALERT_COOLDOWN_SECS:
+                    in_cooldown = True
+
+            if in_cooldown:
+                hits = row["consecutive_hits"] or 0
+                db.close()
+                return False, hits
+
+            if row:
+                # Check timeout — reset if too much time passed
+                last_hit = row["value"]
+                if last_hit and last_hit > 0 and (now - last_hit) > ALERT_CONSECUTIVE_TIMEOUT_SECS:
+                    db.execute(
+                        "UPDATE alert_cooldowns SET consecutive_hits = 1, value = ?, triggered_at = 0 WHERE alert_key = ?",
+                        (now, alert_key)
+                    )
+                    hits = 1
+                else:
+                    # Atomic increment
+                    db.execute(
+                        "UPDATE alert_cooldowns SET consecutive_hits = consecutive_hits + 1, value = ? WHERE alert_key = ?",
+                        (now, alert_key)
+                    )
+                    row2 = db.execute(
+                        "SELECT consecutive_hits FROM alert_cooldowns WHERE alert_key = ?",
+                        (alert_key,)
+                    ).fetchone()
+                    hits = row2["consecutive_hits"] or 0
+            else:
+                # First hit
+                db.execute(
+                    "INSERT INTO alert_cooldowns (alert_key, triggered_at, value, consecutive_hits) VALUES (?, 0, ?, 1)",
+                    (alert_key, now)
+                )
+                hits = 1
+
+            should_alert = hits >= ALERT_CONSECUTIVE_THRESHOLD
+            if should_alert:
+                db.execute(
+                    "UPDATE alert_cooldowns SET triggered_at = ? WHERE alert_key = ?",
+                    (now, alert_key)
+                )
+
+            db.commit()
+            db.close()
+            logger.info(f"_increment_consecutive: {alert_key} hits={hits} should_alert={should_alert}")
+            return should_alert, hits
 
     def check_metric(self, source: str, widget_id: str, hostname: str,
                      metric_name: str, value: float, threshold: float,
@@ -105,12 +210,25 @@ class AlertService:
             return None
         alert_key = f"{widget_id}|{metric_name}"
         if value > threshold:
-            if not self.should_trigger(alert_key):
-                return None
-            self.mark_triggered(alert_key)
+            logger.info(f"check_metric: {alert_key} value={value} > threshold={threshold}")
+            should_alert, hits = self._increment_consecutive(alert_key)
+            if not should_alert:
+                # Return a "pending" marker so the frontend can show progress
+                return {
+                    "widget_id": widget_id,
+                    "widget_title": f"{source} ({hostname})",
+                    "metric": metric_name,
+                    "value": value,
+                    "threshold": threshold,
+                    "unit": unit,
+                    "consecutive_hits": hits,
+                    "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
+                    "description": None
+                }
             desc = (f"{source} ({hostname}): {metric_name} достиг {value:.0f}{unit} "
                     f"(порог: {threshold:.0f}{unit}).\n"
-                    f"Превышение на {value - threshold:.0f}{unit}.")
+                    f"Превышение на {value - threshold:.0f}{unit}.\n"
+                    f"Алерт сработал после {hits} последовательных превышений.")
             return {
                 "widget_id": widget_id,
                 "widget_title": f"{source} ({hostname})",
@@ -118,10 +236,12 @@ class AlertService:
                 "value": value,
                 "threshold": threshold,
                 "unit": unit,
+                "consecutive_hits": hits,
+                "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
                 "description": desc
             }
         else:
-            self.reset_cooldown(alert_key)
+            self._delete(alert_key)
             return None
 
     def check_metrics(self, source: str, widget_id: str, hostname: str,
@@ -149,26 +269,37 @@ class AlertService:
             ("RAM", metrics.get("ram", 0), "alertRamEnabled", "alertRamThreshold"),
             ("Disk", metrics.get("disk", 0), "alertDiskEnabled", "alertDiskThreshold"),
         ]
-        db = get_db()
-        now = time.time()
         for name, val, enabled_key, threshold_key in checks:
             enabled = config.get(enabled_key, True)
             threshold = config.get(threshold_key, 90)
             if not enabled or val <= threshold:
                 continue
             alert_key = f"{widget_id}|{name}"
-            row = db.execute("SELECT triggered_at FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
-            if row and (now - row["triggered_at"]) < ALERT_COOLDOWN_SECS:
-                alerts.append({
-                    "widget_id": widget_id,
-                    "widget_title": f"{source} ({hostname})",
-                    "metric": name,
-                    "value": val,
-                    "threshold": threshold,
-                    "unit": "%",
-                    "description": f"{source} ({hostname}): {name} достиг {val:.0f}% (порог: {threshold:.0f}%)."
-                })
-        db.close()
+            row = self._get_row(alert_key)
+            if row:
+                try:
+                    hits = row["consecutive_hits"] or 0
+                except (KeyError, IndexError):
+                    hits = 0
+                try:
+                    triggered_at = row["triggered_at"] or 0
+                except (KeyError, IndexError):
+                    triggered_at = 0
+                now = time.time()
+                in_cooldown = triggered_at > 0 and (now - triggered_at) < ALERT_COOLDOWN_SECS
+                if in_cooldown or hits > 0:
+                    alerts.append({
+                        "widget_id": widget_id,
+                        "widget_title": f"{source} ({hostname})",
+                        "metric": name,
+                        "value": val,
+                        "threshold": threshold,
+                        "unit": "%",
+                        "consecutive_hits": hits,
+                        "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
+                        "description": None if not in_cooldown else
+                            f"{source} ({hostname}): {name} достиг {val:.0f}% (порог: {threshold:.0f}%)."
+                    })
         return alerts
 
     async def send_webhook(self, alerts: list[dict]):
@@ -205,6 +336,18 @@ class AlertService:
 
 # Singleton
 alert_service = AlertService()
+
+# --- Safe fire-and-forget helper for sync endpoints ---
+def _fire_webhook(alerts: list[dict]):
+    """Schedule webhook delivery in a background thread — safe from sync endpoints."""
+    if not alerts:
+        return
+    def _run():
+        try:
+            asyncio.run(alert_service.send_webhook(alerts))
+        except Exception:
+            pass
+    threading.Thread(target=_run, daemon=True).start()
 
 # --- System Info ---
 @app.get("/api/sysinfo")
@@ -268,11 +411,7 @@ def sysinfo():
     pending = alert_service.pending_alerts("sysload", hostname, "System Load", metrics, config)
     # Fire-and-forget webhook for new alerts (sync version — won't block)
     if new_alerts:
-        try:
-            loop = asyncio.get_event_loop()
-            loop.create_task(alert_service.send_webhook(new_alerts))
-        except RuntimeError:
-            pass
+        _fire_webhook(new_alerts)
     return {"cpu": cpu, "ram": mem, "disk": disk, "uptime": uptime,
             "load1": float(load[0]), "load5": float(load[1]), "load15": float(load[2]),
             "hostname": hostname,
@@ -284,7 +423,7 @@ def sysinfo():
 @app.get("/api/docker")
 def docker():
     try:
-        out = subprocess.check_output(["docker","ps","-a","--format","{{json .}}"], env={**os.environ, "DOCKER_HOST": "unix:///var/run/docker.sock"}).decode()
+        out = subprocess.check_output(["docker","ps","-a","--format","{{json .}}"], env={**os.environ, "DOCKER_HOST": "unix:///var/run/docker.sock"}, timeout=10).decode()
         containers = []
         for line in out.strip().split("\n"):
             if not line: continue
@@ -306,22 +445,10 @@ def docker():
         if config.get("alertStoppedEnabled", True) and len(stopped) > config.get("alertStoppedThreshold", 0):
             stopped_names = ", ".join(c["name"] for c in stopped)
             alert_key = "docker|stopped"
-            # Fingerprint-based dedup (stopped set may change)
-            fp = stopped_names or "none"
-            db = get_db()
-            row = db.execute("SELECT triggered_at, value FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
-            now = time.time()
-            send = False
-            if row:
-                if (now - row["triggered_at"]) >= ALERT_COOLDOWN_SECS or str(row.get("value", "")) != fp:
-                    send = True
-            else:
-                send = True
-            if send:
-                db.execute("INSERT OR REPLACE INTO alert_cooldowns (alert_key, triggered_at, value) VALUES (?, ?, ?)", (alert_key, now, fp))
-                db.commit()
-                db.close()
-                desc = (f"Docker: {len(stopped)} остановленных контейнеров (порог: {config.get('alertStoppedThreshold', 0)}).\n{stopped_names}")
+            should_alert, hits = alert_service._increment_consecutive(alert_key)
+            if should_alert:
+                desc = (f"Docker: {len(stopped)} остановленных контейнеров (порог: {config.get('alertStoppedThreshold', 0)}).\n{stopped_names}\n"
+                        f"Алерт сработал после {hits} последовательных проверок.")
                 alert_data = {
                     "widget_id": "docker",
                     "widget_title": "Docker Containers",
@@ -329,39 +456,34 @@ def docker():
                     "value": len(stopped),
                     "threshold": config.get("alertStoppedThreshold", 0),
                     "unit": " шт.",
+                    "consecutive_hits": hits,
+                    "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
                     "description": desc
                 }
                 docker_alerts.append(alert_data)
-                try:
-                    loop = asyncio.get_event_loop()
-                    loop.create_task(alert_service.send_webhook([alert_data]))
-                except RuntimeError:
-                    pass
+                _fire_webhook([alert_data])
             else:
-                # Still report as pending if in cooldown
-                if row and (now - row["triggered_at"]) < ALERT_COOLDOWN_SECS:
-                    docker_alerts.append({
-                        "widget_id": "docker",
-                        "widget_title": "Docker Containers",
-                        "metric": "Stopped",
-                        "value": len(stopped),
-                        "threshold": config.get("alertStoppedThreshold", 0),
-                        "unit": " шт.",
-                        "description": f"Docker: {len(stopped)} остановленных контейнеров."
-                    })
-                db.close()
+                # Still report as pending with consecutive count
+                docker_alerts.append({
+                    "widget_id": "docker",
+                    "widget_title": "Docker Containers",
+                    "metric": "Stopped",
+                    "value": len(stopped),
+                    "threshold": config.get("alertStoppedThreshold", 0),
+                    "unit": " шт.",
+                    "consecutive_hits": hits,
+                    "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
+                    "description": None
+                })
         else:
             # Clear cooldown if condition resolved
-            db = get_db()
-            db.execute("DELETE FROM alert_cooldowns WHERE alert_key = ?", ("docker|stopped",))
-            db.commit()
-            db.close()
+            alert_service._delete("docker|stopped")
         # Attach alerts to each container (as a convenience field)
         return {"containers": containers, "alerts": docker_alerts}
     except Exception as e:
-        return [{"id":"demo1","name":"nginx","image":"nginx:latest","status":"Up 2 days","running":True,"ports":"80:80"},
-                {"id":"demo2","name":"postgres","image":"postgres:15","status":"Up 5 hours","running":True,"ports":"5432:5432"},
-                {"id":"demo3","name":"redis","image":"redis:alpine","status":"Exited (1) 3 days ago","running":False,"ports":""}]
+        logger.warning(f"Docker API error: {e}")
+        # Return empty structure with error flag instead of fake demo data
+        return {"containers": [], "alerts": [], "error": str(e)}
 
 # --- Tailscale ---
 @app.get("/api/tailscale")
@@ -442,14 +564,14 @@ def logs(lines: int = 30, services: str = "system"):
     for svc in svcs:
         try:
             if svc == "system":
-                cmd = ["bash","-c",f"journalctl -n {lines} --no-page --directory=/host/log/journal 2>/dev/null | tail -n {lines}"]
+                cmd = ["journalctl", "-n", str(lines), "--no-page", "--directory=/host/log/journal"]
             else:
                 m = re.match(r'^\[(\w+)\](.+)$', svc)
                 if m:
                     uname, u_svc = m.group(1), m.group(2).strip()
-                    cmd = ["bash","-c",f"journalctl --directory=/host/log/journal _SYSTEMD_USER_UNIT={u_svc}.service -n {lines} --no-page 2>/dev/null"]
+                    cmd = ["journalctl", f"_SYSTEMD_USER_UNIT={u_svc}.service", "-n", str(lines), "--no-page", "--directory=/host/log/journal"]
                 else:
-                    cmd = ["bash","-c",f"journalctl -u {svc} -n {lines} --no-page --directory=/host/log/journal 2>/dev/null"]
+                    cmd = ["journalctl", "-u", svc, "-n", str(lines), "--no-page", "--directory=/host/log/journal"]
             out = subprocess.check_output(cmd, timeout=5).decode()
             entry_lines = []
             for line in out.strip().split("\n"):
@@ -479,22 +601,56 @@ def get_todo():
                     "due": t.get("due","")
                 })
             return {"count": len(tasks), "pending": sum(1 for t in tasks if t["status"] in ("pending","in_progress","active")), "tasks": tasks}
-    except:
-        return {"count": 5, "pending": 3,
-                "tasks": [
-                    {"id":"1","text":"Обновить сервер до 24.04","status":"pending","priority":"high","due":"2025-05-15"},
-                    {"id":"2","text":"Настроить бэкапы на S3","status":"in_progress","priority":"high","due":"2025-05-20"},
-                    {"id":"3","text":"Почистить Docker volumes","status":"pending","priority":"low","due":""},
-                    {"id":"4","text":"Проверить TLS сертификаты","status":"completed","priority":"medium","due":""},
-                    {"id":"5","text":"Обновить документацию","status":"pending","priority":"low","due":""}
-                ]}
+    except Exception as e:
+        logger.warning(f"TODO API error: {e}")
+        # Return empty structure with error flag instead of fake demo data
+        return {"count": 0, "pending": 0, "tasks": [], "error": str(e)}
+
+# --- Promotions ---
+PROMO_DB_PATH = os.environ.get("PROMO_DB_PATH", os.path.expanduser("~/.hermes/data/promotions.db"))
+
+@app.get("/api/promotions")
+def get_promotions():
+    """Возвращает активные акции из БД promotions."""
+    try:
+        conn = sqlite3.connect(PROMO_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT * FROM promotions
+            WHERE status = 'active' AND end_date >= date('now')
+            ORDER BY end_date ASC, brand ASC
+        """).fetchall()
+        conn.close()
+        promos = []
+        for r in rows:
+            promos.append({
+                "id": r["id"],
+                "brand": r["brand"],
+                "description": r["description"],
+                "terms": r["terms"],
+                "benefit": r["benefit"],
+                "end_date": r["end_date"],
+                "source": r["source"],
+                "category": r["category"],
+                "url": r["url"],
+                "priority": r["priority"],
+            })
+        return {"promotions": promos, "count": len(promos)}
+    except Exception as e:
+        return {"promotions": [], "count": 0, "error": str(e)}
 
 # --- Weather ---
 @app.get("/api/weather")
 def weather():
     import urllib.request
+    lat = os.environ.get("WEATHER_LAT", "55.7558").strip()
+    lon = os.environ.get("WEATHER_LON", "37.6173").strip()
+    city = os.environ.get("WEATHER_CITY", "Moscow").strip()
+    api = os.environ.get("WEATHER_API", "https://api.open-meteo.com/v1/forecast").strip().rstrip("/")
     try:
-        url = "https://api.open-meteo.com/v1/forecast?latitude=55.7558&longitude=37.6173&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=Europe/Moscow"
+        url = (f"{api}?latitude={lat}&longitude={lon}"
+               f"&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m"
+               f"&daily=temperature_2m_max,temperature_2m_min&timezone=Europe/Moscow")
         with urllib.request.urlopen(url, timeout=5) as resp:
             data = json.loads(resp.read().decode())
         current = data.get("current",{})
@@ -508,11 +664,14 @@ def weather():
             "wind": current.get("wind_speed_10m",0),
             "icon": icons.get(code,"🌡️"),
             "code": code,
-            "city": "Moscow",
+            "city": city,
             "forecast": {"max": daily.get("temperature_2m_max",[0])[0], "min": daily.get("temperature_2m_min",[0])[0]}
         }
     except Exception as e:
-        return {"temp":22,"humidity":45,"wind":3.5,"icon":"☀️","code":0,"city":"Moscow","forecast":{"max":25,"min":14}}
+        logger.warning(f"Weather fetch failed: {e}")
+        # Return empty structure with error flag instead of fake demo data
+        return {"temp":None,"humidity":None,"wind":None,"icon":"🌡️","code":0,"city":city,
+                "forecast":{"max":None,"min":None},"error":str(e)}
 
 # --- Crypto ---
 @app.get("/api/crypto")
@@ -661,19 +820,14 @@ def get_server_status():
                                                    "Server Status", metrics, config)
             results[sid]["alerts"] = pending
             if new_alerts:
-                try:
-                    loop = asyncio.get_event_loop()
-                    loop.create_task(alert_service.send_webhook(new_alerts))
-                except RuntimeError:
-                    pass
+                _fire_webhook(new_alerts)
         else:
             # Server offline alert check
             config = get_widget_config_dict(sid)
             if config.get("alertOfflineEnabled", True):
                 alert_key = f"{sid}|Offline"
-                alert_data = None
-                if alert_service.should_trigger(alert_key):
-                    alert_service.mark_triggered(alert_key)
+                should_alert, hits = alert_service._increment_consecutive(alert_key)
+                if should_alert:
                     alert_data = {
                         "widget_id": sid,
                         "widget_title": f"Server Status ({cfg['name']})",
@@ -681,31 +835,25 @@ def get_server_status():
                         "value": 0,
                         "threshold": 0,
                         "unit": "",
-                        "description": f"Server Status ({cfg['name']}): сервер НЕДОСТУПЕН (Offline).\nНет ответа по SSH — проверьте соединение."
+                        "consecutive_hits": hits,
+                        "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
+                        "description": f"Server Status ({cfg['name']}): сервер НЕДОСТУПЕН (Offline).\nНет ответа по SSH — проверьте соединение.\nАлерт сработал после {hits} последовательных проверок."
                     }
-                    try:
-                        loop = asyncio.get_event_loop()
-                        loop.create_task(alert_service.send_webhook([alert_data]))
-                    except RuntimeError:
-                        pass
+                    _fire_webhook([alert_data])
                     results[sid]["alerts"] = [alert_data]
                 else:
-                    # Still show in pending if cooldown active
-                    db = get_db()
-                    row = db.execute("SELECT triggered_at FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
-                    db.close()
-                    if row and (time.time() - row["triggered_at"]) < ALERT_COOLDOWN_SECS:
-                        results[sid]["alerts"] = [{
-                            "widget_id": sid,
-                            "widget_title": f"Server Status ({cfg['name']})",
-                            "metric": "Доступность",
-                            "value": 0,
-                            "threshold": 0,
-                            "unit": "",
-                            "description": f"Server Status ({cfg['name']}): сервер НЕДОСТУПЕН (Offline)."
-                        }]
-                    else:
-                        results[sid]["alerts"] = []
+                    # Show pending with consecutive count
+                    results[sid]["alerts"] = [{
+                        "widget_id": sid,
+                        "widget_title": f"Server Status ({cfg['name']})",
+                        "metric": "Доступность",
+                        "value": 0,
+                        "threshold": 0,
+                        "unit": "",
+                        "consecutive_hits": hits,
+                        "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
+                        "description": None
+                    }]
             else:
                 results[sid]["alerts"] = []
     
@@ -774,19 +922,8 @@ def get_site_status():
         names = ", ".join(s["url"] for s in offline)
         statuses = ", ".join(f"{s['url']} ({s['status']})" for s in offline)
         alert_key = "sites|offline"
-        db = get_db()
-        row = db.execute("SELECT triggered_at, value FROM alert_cooldowns WHERE alert_key = ?", (alert_key,)).fetchone()
-        now_ts = time.time()
-        send = False
-        if row:
-            if (now_ts - row["triggered_at"]) >= ALERT_COOLDOWN_SECS or str(row.get("value", "")) != names:
-                send = True
-        else:
-            send = True
-        if send:
-            db.execute("INSERT OR REPLACE INTO alert_cooldowns (alert_key, triggered_at, value) VALUES (?, ?, ?)", (alert_key, now_ts, names))
-            db.commit()
-            db.close()
+        should_alert, hits = alert_service._increment_consecutive(alert_key)
+        if should_alert:
             alert_data = {
                 "widget_id": "sites",
                 "widget_title": "Sites",
@@ -794,32 +931,28 @@ def get_site_status():
                 "value": len(offline),
                 "threshold": 0,
                 "unit": " сайт.",
-                "description": f"Обнаружены недоступные сайты ({len(offline)}):\n{statuses}"
+                "consecutive_hits": hits,
+                "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
+                "description": f"Обнаружены недоступные сайты ({len(offline)}):\n{statuses}\n"
+                               f"Алерт сработал после {hits} последовательных проверок."
             }
             site_alerts.append(alert_data)
-            try:
-                loop = asyncio.get_event_loop()
-                loop.create_task(alert_service.send_webhook([alert_data]))
-            except RuntimeError:
-                pass
+            _fire_webhook([alert_data])
         else:
-            if row and (now_ts - row["triggered_at"]) < ALERT_COOLDOWN_SECS:
-                site_alerts.append({
-                    "widget_id": "sites",
-                    "widget_title": "Sites",
-                    "metric": "Offline",
-                    "value": len(offline),
-                    "threshold": 0,
-                    "unit": " сайт.",
-                    "description": f"Обнаружены недоступные сайты ({len(offline)})."
-                })
-            db.close()
+            site_alerts.append({
+                "widget_id": "sites",
+                "widget_title": "Sites",
+                "metric": "Offline",
+                "value": len(offline),
+                "threshold": 0,
+                "unit": " сайт.",
+                "consecutive_hits": hits,
+                "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
+                "description": None
+            })
     else:
         # Clear cooldown if resolved
-        db = get_db()
-        db.execute("DELETE FROM alert_cooldowns WHERE alert_key = ?", ("sites|offline",))
-        db.commit()
-        db.close()
+        alert_service._delete("sites|offline")
 
     if site_alerts:
         return {"sites": results, "alerts": site_alerts}
@@ -871,7 +1004,7 @@ class AlertPayload(BaseModel):
     messages: List[AlertMessage]
 
 @app.post("/api/alert")
-async def trigger_alert(payload: AlertPayload):
+async def trigger_alert(payload: AlertPayload, api_key: str = Depends(require_api_key)):
     webhook_url = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
     auth_token = os.environ.get("ALERT_WEBHOOK_AUTH_TOKEN", "").strip()
     if not webhook_url:
@@ -914,7 +1047,7 @@ def get_all_configs():
     return {row["widget_id"]: json.loads(row["config"]) for row in rows}
 
 @app.put("/api/config/{widget_id}")
-def set_widget_config(widget_id: str, body: ConfigInput):
+def set_widget_config(widget_id: str, body: ConfigInput, api_key: str = Depends(require_api_key)):
     db = get_db()
     db.execute("INSERT OR REPLACE INTO widget_config (widget_id, config) VALUES (?, ?)",
                (widget_id, json.dumps(body.config)))
@@ -923,7 +1056,7 @@ def set_widget_config(widget_id: str, body: ConfigInput):
     return {"status": "ok", "widget_id": widget_id}
 
 @app.delete("/api/config/{widget_id}")
-def delete_widget_config(widget_id: str):
+def delete_widget_config(widget_id: str, api_key: str = Depends(require_api_key)):
     db = get_db()
     db.execute("DELETE FROM widget_config WHERE widget_id = ?", (widget_id,))
     db.commit()
@@ -975,8 +1108,8 @@ if __name__ == "__main__":
                                     config = get_widget_config_dict(sid)
                                     if config.get("alertOfflineEnabled", True):
                                         alert_key = f"{sid}|Offline"
-                                        if alert_service.should_trigger(alert_key):
-                                            alert_service.mark_triggered(alert_key)
+                                        should_alert, hits = alert_service._increment_consecutive(alert_key)
+                                        if should_alert:
                                             alerts.append({
                                                 "widget_id": sid,
                                                 "widget_title": f"Server Status ({srv.get('name', sid)})",
@@ -984,7 +1117,9 @@ if __name__ == "__main__":
                                                 "value": 0,
                                                 "threshold": 0,
                                                 "unit": "",
-                                                "description": f"Server Status ({srv.get('name', sid)}): сервер НЕДОСТУПЕН (Offline)."
+                                                "consecutive_hits": hits,
+                                                "consecutive_threshold": ALERT_CONSECUTIVE_THRESHOLD,
+                                                "description": f"Server Status ({srv.get('name', sid)}): сервер НЕДОСТУПЕН (Offline).\nАлерт сработал после {hits} последовательных проверок."
                                             })
                 except Exception as e:
                     logger.warning(f"Background server-status check failed: {e}")

@@ -18,11 +18,13 @@ services:
       - /run/tailscale:/var/run/tailscale:ro
       - ${HOME}/.ssh:/root/.ssh:ro
       - /projects/dashboard/data:/ollama-data:ro
+      - ${HOME}/.hermes/data:/hermes-data:ro
       - dashboard-data:/data
     environment:
       - HOST_PROC=/host/proc
       - HOST_SYS=/host/sys
       - BACKEND_HOSTNAME=${BACKEND_HOSTNAME:-host}
+      - PROMO_DB_PATH=/hermes-data/promotions.db
     cap_add:
       - SYS_PTRACE
 

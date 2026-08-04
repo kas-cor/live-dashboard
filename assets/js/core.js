@@ -37,9 +37,12 @@ class BaseWidget {
   async saveConfig() {
     this._saveConfigLocal();
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      const apiKey = localStorage.getItem('dashboard-api-key');
+      if (apiKey) headers['X-API-Key'] = apiKey;
       await fetch('/api/config/' + this.id, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ config: this.config })
       });
     } catch(e) {}
@@ -360,11 +363,17 @@ class AlertManager {
 
   trigger(alert) {
     const now = Date.now();
-    const key = (alert.widgetId || 'unknown') + '|' + (alert.metric || 'unknown');
+    const key = (alert.widget_id || alert.widgetId || 'unknown') + '|' + (alert.metric || 'unknown');
+
+    // If description is null — this is a "pending" accumulation alert, not a real one
+    // The widget itself will show the progress indicator
+    if (!alert.description) {
+      return;
+    }
 
     // If this exact alert is already showing — skip silently
     if (this._active && this._currentAlert &&
-        (this._currentAlert.widgetId || 'unknown') + '|' + (this._currentAlert.metric || 'unknown') === key) {
+        (this._currentAlert.widget_id || this._currentAlert.widgetId || 'unknown') + '|' + (this._currentAlert.metric || 'unknown') === key) {
       return;
     }
 
@@ -466,7 +475,7 @@ class AlertManager {
   dismiss() {
     // Save cooldown timestamp on dismiss (extends the 10-min silence)
     if (this._currentAlert) {
-      const key = (this._currentAlert.widgetId || 'unknown') + '|' + (this._currentAlert.metric || 'unknown');
+      const key = (this._currentAlert.widget_id || this._currentAlert.widgetId || 'unknown') + '|' + (this._currentAlert.metric || 'unknown');
       this._cooldowns.set(key, Date.now());
       this._saveCooldowns();
     }

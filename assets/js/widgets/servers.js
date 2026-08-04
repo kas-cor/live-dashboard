@@ -92,7 +92,8 @@ class ServerWidget extends BaseWidget {
     const setBar = (cls, val) => {
       const el = body.querySelector('.' + cls);
       if (!el) return;
-      const bar = el.closest('.metric')?.querySelector('.progress-fill');
+      const metricEl = el.closest('.metric');
+      const bar = metricEl?.querySelector('.progress-fill');
       const num = typeof val === 'number' ? val : 0;
       if (bar) {
         bar.style.width = Math.min(num, 100) + '%';
@@ -101,6 +102,26 @@ class ServerWidget extends BaseWidget {
         else bar.style.background = '#00ff88';
       }
       el.textContent = num + '%';
+
+      // Threshold line
+      const metricName = cls.replace('-value', '');
+      const thresholdKey = 'alert' + metricName.charAt(0).toUpperCase() + metricName.slice(1) + 'Threshold';
+      const threshold = this.getConfig(thresholdKey, 90);
+      let line = metricEl?.querySelector('.threshold-line');
+      if (!line && metricEl) {
+        line = document.createElement('div');
+        line.className = 'threshold-line';
+        line.style.cssText = 'position:absolute;top:0;bottom:0;width:2px;background:#ff0044;opacity:0.7;z-index:2;';
+        const barContainer = metricEl.querySelector('.progress-bar');
+        if (barContainer) {
+          barContainer.style.position = 'relative';
+          barContainer.appendChild(line);
+        }
+      }
+      if (line) {
+        line.style.left = Math.min(threshold, 100) + '%';
+        line.title = 'Порог: ' + threshold + '%';
+      }
     };
 
     const cpuVal = server.online ? (server.cpu || 0) : 0;
@@ -123,7 +144,31 @@ class ServerWidget extends BaseWidget {
     if (window.alertManager && server.alerts && server.alerts.length > 0) {
       for (const alert of server.alerts) {
         window.alertManager.trigger(alert);
+        // If alert has description — it already fired, remove pending indicator
+        if (alert.description) {
+          const metricEl = body.querySelector('.metric-' + (alert.metric || '').toLowerCase());
+          if (metricEl) {
+            const pendingEl = metricEl.querySelector('.alert-pending');
+            if (pendingEl) pendingEl.remove();
+          }
+        } else if (alert.consecutive_hits && alert.consecutive_threshold) {
+          // Show pending accumulation in the metric bar
+          const metricEl = body.querySelector('.metric-' + (alert.metric || '').toLowerCase());
+          if (metricEl) {
+            let pendingEl = metricEl.querySelector('.alert-pending');
+            if (!pendingEl) {
+              pendingEl = document.createElement('span');
+              pendingEl.className = 'alert-pending';
+              pendingEl.style.cssText = 'display:block;font-size:10px;color:#ff8800;margin-top:2px;';
+              metricEl.appendChild(pendingEl);
+            }
+            pendingEl.textContent = '⚠ ' + alert.consecutive_hits + '/' + alert.consecutive_threshold;
+          }
+        }
       }
+    } else if (server.alerts && server.alerts.length === 0) {
+      // Clear all pending indicators when condition resolved
+      body.querySelectorAll('.alert-pending').forEach(el => el.remove());
     }
   }
 }
