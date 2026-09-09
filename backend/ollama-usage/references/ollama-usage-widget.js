@@ -79,6 +79,15 @@ class OllamaUsageWidget extends BaseWidget {
       return `${mins}m`;
     };
 
+    // Absolute reset datetime (local): m.d.Y H:i
+    const fmtAbsReset = (iso) => {
+      if (!iso) return null;
+      const dt = new Date(iso);
+      if (isNaN(dt)) return null;
+      const p = (n) => String(n).padStart(2, '0');
+      return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()} ${p(dt.getHours())}:${p(dt.getMinutes())}`;
+    };
+
     // Update usage bar
     const valEl = body.querySelector('.usage-value');
     const bar = valEl?.closest('.metric')?.querySelector('.progress-fill');
@@ -90,9 +99,13 @@ class OllamaUsageWidget extends BaseWidget {
     }
     if (valEl) valEl.textContent = usagePct + '%';
 
-    // Reset time in header
+    // Reset time in header: absolute (local) + relative in parens
     const resetEl = body.querySelector('.usage-reset');
-    if (resetEl) resetEl.textContent = 'resets: ' + fmtReset(usage.resets_at);
+    if (resetEl) {
+      const abs = fmtAbsReset(usage.resets_at);
+      if (abs) resetEl.textContent = `resets: ${abs} (${fmtReset(usage.resets_at)})`;
+      else resetEl.textContent = 'resets: --';
+    }
 
     // Models this month (по доле usage)
     const modelsList = body.querySelector('.models-list');
