@@ -121,34 +121,26 @@ The system automatically calls `render()` → `update()` → `start(interval)`. 
 Located at `backend/ollama-usage/` — see `backend/ollama-usage/SKILL.md` for full setup instructions.
 
 **What it does:**
-- Parses `ollama.com/settings` and `ollama.com/settings/billing` via session cookie
+- Parses `ollama.com/settings` via session cookie
 - Runs every 30 minutes via cron (no_agent mode)
 - Writes JSON to `data/ollama-usage.json`
 - Backend serves it at `/api/ollama-usage`
 
+> 2026-09: Ollama moved to a single monthly **Included usage** pool (was Session/Weekly). See `backend/ollama-usage/SKILL.md`.
+
 **JSON structure:**
 ```json
 {
-  "plan": "pro",
-  "session": {
-    "percent": 24.7,
-    "resets_at": "2026-06-21T10:00:00Z",
+  "plan": "free",
+  "usage": {
+    "percent": 0.4,
+    "resets_at": "2026-10-04T05:11:16Z",
     "models": [
-      { "model": "deepseek-v4-flash", "requests": 685 }
+      { "model": "nemotron-3-super", "requests": 5, "percent": 78.6 },
+      { "model": "gpt-oss:120b", "requests": 1, "percent": 21.4 }
     ]
   },
-  "weekly": {
-    "percent": 87.0,
-    "resets_at": "2026-06-22T00:00:00Z",
-    "models": [
-      { "model": "deepseek-v4-flash", "requests": 8307 }
-    ]
-  },
-  "subscription": {
-    "ends_at": "2026-07-02",
-    "ends_at_formatted": "July 2, 2026"
-  },
-  "fetched_at": "2026-06-21T09:57:49Z"
+  "fetched_at": "2026-09-09T08:09:38Z"
 }
 ```
 

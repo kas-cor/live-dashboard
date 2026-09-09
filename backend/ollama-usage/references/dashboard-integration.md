@@ -14,49 +14,30 @@ def ollama_usage():
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"error": "no_data", "plan": "unknown",
-                "session": {"percent": 0, "resets_at": None, "models": []},
-                "weekly": {"percent": 0, "resets_at": None, "models": []},
+                "usage": {"percent": 0, "resets_at": None, "models": []},
                 "fetched_at": None}
 
-    # Server-side alert check
-    config = get_widget_config_dict("ollama-usage")
-    alerts = []
-
-    session_pct = data.get("session", {}).get("percent", 0)
-    session_threshold = config.get("alertSessionThreshold", 80)
-    session_enabled = config.get("alertSessionEnabled", True)
-    alert = alert_service.check_metric(
-        "Ollama Cloud", "ollama-usage", "ollama.com",
-        "Session usage", session_pct, session_threshold, session_enabled
-    )
-    if alert:
-        alerts.append(alert)
-
-    weekly_pct = data.get("weekly", {}).get("percent", 0)
-    weekly_threshold = config.get("alertWeeklyThreshold", 80)
-    weekly_enabled = config.get("alertWeeklyEnabled", True)
-    alert = alert_service.check_metric(
-        "Ollama Cloud", "ollama-usage", "ollama.com",
-        "Weekly usage", weekly_pct, weekly_threshold, weekly_enabled
-    )
-    if alert:
-        alerts.append(alert)
-
-    pending = alert_service.pending_alerts("ollama-usage", "ollama.com", "Ollama Cloud", {
-        "Session usage": session_pct,
-        "Weekly usage": weekly_pct,
-    }, config)
-
-    data["alerts"] = pending
-
-    if alerts:
-        try:
-            loop = asyncio.get_event_loop()
-            loop.create_task(alert_service.send_webhook(alerts))
-        except RuntimeError:
-            pass
-
     return data
+```
+
+Endpoint просто отдаёт содержимое `data/ollama-usage.json` (монтируется как
+`/ollama-data`). Серверных alert-проверок для этого виджета сейчас нет.
+
+### JSON-схема (новая модель Ollama — единый месячный Included usage)
+
+```json
+{
+  "plan": "free",
+  "usage": {
+    "percent": 0.4,
+    "resets_at": "2026-10-04T05:11:16Z",
+    "models": [
+      { "model": "nemotron-3-super", "requests": 5, "percent": 78.6 },
+      { "model": "gpt-oss:120b", "requests": 1, "percent": 21.4 }
+    ]
+  },
+  "fetched_at": "2026-09-09T08:09:38Z"
+}
 ```
 
 ## Docker volume mount (`docker-compose.yml`)

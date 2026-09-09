@@ -9,7 +9,12 @@ platforms: [linux]
 
 # Ollama Cloud Usage — Backend Module
 
-Парсит данные об использовании Ollama Cloud с `ollama.com/settings` через session cookie и передаёт их в дашборд.
+Парсит данные об "Included usage" с `ollama.com/settings` через session cookie и передаёт их в дашборд.
+
+> ⚠️ **2026-09:** Ollama перевела лимиты на новую модель. Вместо старых
+> Session/Weekly теперь единый месячный пул **Included usage**
+> (процент за период + дата сброса + модели месяца). Поле `subscription`
+> и `session`/`weekly` упразднены.
 
 Расположение: `/projects/dashboard/backend/ollama-usage/`
 
@@ -33,33 +38,28 @@ backend/ollama-usage/
 Структура:
 ```json
 {
-  "plan": "pro",
-  "session": {
-    "percent": 24.7,
-    "resets_at": "2026-06-21T10:00:00Z",
+  "plan": "free",
+  "usage": {
+    "percent": 0.4,
+    "resets_at": "2026-10-04T05:11:16Z",
     "models": [
-      { "model": "deepseek-v4-flash", "requests": 685 }
+      { "model": "nemotron-3-super", "requests": 5, "percent": 78.6 },
+      { "model": "gpt-oss:120b", "requests": 1, "percent": 21.4 }
     ]
   },
-  "weekly": {
-    "percent": 87.0,
-    "resets_at": "2026-06-22T00:00:00Z",
-    "models": [
-      { "model": "deepseek-v4-flash", "requests": 8307 }
-    ]
-  },
-  "subscription": {
-    "ends_at": "2026-07-02",
-    "ends_at_formatted": "July 2, 2026"
-  },
-  "fetched_at": "2026-06-21T09:57:49Z"
+  "fetched_at": "2026-09-09T08:09:38Z"
 }
 ```
+
+- `plan` — бейдж тарифа (`free` / `pro` / `max`) рядом с "Included usage"
+- `usage.percent` — процент месячного Included usage, уже использованный
+- `usage.resets_at` — дата сброса пула (строка "Resets in ...")
+- `usage.models` — модели месяца: `requests` (кол-во запросов) и `percent` (доля usage из трека)
 
 ## Как это работает
 
 1. **Cron** (каждые 30 мин) запускает `ollama-usage-dashboard.sh`
-2. Скрипт дёргает `ollama.com/settings` и `ollama.com/settings/billing` с session cookie
+2. Скрипт дёргает `ollama.com/settings` с session cookie
 3. Парсит HTML, собирает JSON
 4. Пишет в `/projects/dashboard/data/ollama-usage.json`
 5. Docker volume монтирует эту папку в backend-контейнер как `/ollama-data:ro`

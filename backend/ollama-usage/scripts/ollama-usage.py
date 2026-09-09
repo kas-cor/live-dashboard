@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 Ollama Cloud Usage Checker
-Парсит данные об использовании с ollama.com/settings через session cookie.
+Парсит данные об "Included usage" с ollama.com/settings через session cookie.
+
+Внимание: Ollama перевела лимиты на новую модель — вместо старых
+Session/Weekly теперь единый месячный пул "Included usage"
+(процент за период + дата сброса + модели месяца).
 
 Использование:
   python3 ollama-usage.py                          # краткий вывод
@@ -24,7 +28,6 @@ import urllib.request
 from datetime import datetime, timezone
 
 SETTINGS_URL = "https://ollama.com/settings"
-BILLING_URL = "https://ollama.com/settings/billing"
 COOKIE_NAME = "__Secure-session"
 DEFAULT_COOKIE_FILE = os.path.expanduser("~/.hermes/scripts/.ollama-session-cookie")
 
@@ -48,149 +51,78 @@ def fetch_page(url: str, cookie_value: str) -> str:
         sys.exit(1)
 
     # Проверяем, что мы действительно на странице, а не на логине
-    if "Sign in" in html and "Cloud usage" not in html and "subscription" not in html.lower():
+    if "Sign in" in html and "Included usage" not in html:
         print("SESSION_EXPIRED", flush=True)
         sys.exit(1)
 
     return html
 
 
-def parse_billing(html: str) -> dict | None:
-    """Парсит страницу /settings/billing и возвращает дату окончания подписки."""
-    match = re.search(
-        r'Your subscription ends on <span[^>]*>([A-Za-z]+ \d+, \d{4})</span>',
-        html,
-    )
-    if match:
-        date_str = match.group(1)
-        try:
-            dt = datetime.strptime(date_str, "%B %d, %Y")
-            return {
-                "ends_at": dt.strftime("%Y-%m-%d"),
-                "ends_at_formatted": date_str,
-            }
-        except ValueError:
-            pass
-    return None
-
-
-def parse_usage(html: str, billing_html: str | None = None) -> dict:
-    """Парсит HTML и возвращает структуру с данными об использовании."""
-
+def parse_usage(html: str) -> dict:
+    """Парсит HTML /settings и возвращает месячный пул Included usage."""
     result = {
         "plan": "unknown",
-        "session": {"percent": 0, "resets_at": None, "models": []},
-        "weekly": {"percent": 0, "resets_at": None, "models": []},
-        "subscription": None,
+        "usage": {"percent": 0, "resets_at": None, "models": []},
         "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
-    # План (pro / max / free) — ищем в блоке Cloud usage
+    # План (free / pro / max) — бейдж рядом с заголовком "Included usage"
     plan_match = re.search(
-        r'Cloud usage</span>.*?rounded-full[^>]*>\s*(\w+)\s*</span\s*>',
+        r"capitalize\"\s*>\s*([A-Za-z]+)\s*</span\s*>",
         html,
-        re.DOTALL,
     )
     if plan_match:
         result["plan"] = plan_match.group(1).lower()
 
-    # Session usage percent
-    session_pct_match = re.search(
-        r'aria-label="Session usage\s+([\d.]+)%\s*used"', html
+    # Общий процент использованного Included usage за месяц
+    pct_match = re.search(
+        r'data-usage-track\s+aria-label="[^"]*?([\d.]+)%\s*used"',
+        html,
     )
-    if session_pct_match:
-        result["session"]["percent"] = round(float(session_pct_match.group(1)), 1)
+    if pct_match:
+        result["usage"]["percent"] = round(float(pct_match.group(1)), 1)
 
-    # Weekly usage percent
-    weekly_pct_match = re.search(
-        r'aria-label="Weekly usage\s+([\d.]+)%\s*used"', html
+    # Дата сброса (строка "Resets in ..." с data-time рядом)
+    reset_match = re.search(
+        r'data-time="([^"]+)"\s*>\s*Resets in',
+        html,
     )
-    if weekly_pct_match:
-        result["weekly"]["percent"] = round(float(weekly_pct_match.group(1)), 1)
+    if reset_match:
+        result["usage"]["resets_at"] = reset_match.group(1)
 
-    # Session resets at (data-time атрибут)
-    session_time_match = re.search(
-        r'Session usage.*?data-time="([^"]+)"', html, re.DOTALL
-    )
-    if session_time_match:
-        result["session"]["resets_at"] = session_time_match.group(1)
-
-    # Weekly resets at
-    weekly_time_match = re.search(
-        r'Weekly usage.*?data-time="([^"]+)"', html, re.DOTALL
-    )
-    if weekly_time_match:
-        result["weekly"]["resets_at"] = weekly_time_match.group(1)
-
-    # Session per-model breakdown
-    session_block = re.search(
-        r'Session usage.*?(?=Weekly usage)', html, re.DOTALL
-    )
-    if session_block:
-        for m in re.finditer(
-            r'data-model="([^"]+)"[^>]*data-requests="(\d+)"',
-            session_block.group(0),
-        ):
-            result["session"]["models"].append({
-                "model": m.group(1),
-                "requests": int(m.group(2)),
-            })
-
-    # Weekly per-model breakdown
-    weekly_block = re.search(r'Weekly usage.*', html, re.DOTALL)
-    if weekly_block:
-        for m in re.finditer(
-            r'data-model="([^"]+)"[^>]*data-requests="(\d+)"',
-            weekly_block.group(0),
-        ):
-            result["weekly"]["models"].append({
-                "model": m.group(1),
-                "requests": int(m.group(2)),
-            })
-
-    # Billing info (subscription end date)
-    if billing_html:
-        billing = parse_billing(billing_html)
-        if billing:
-            result["subscription"] = billing
+    # Модели месяца — сегменты внутри трека (стиль → доля, data-model, data-requests)
+    for m in re.finditer(
+        r'style="width:\s*([\d.]+)%;[^"]*"\s*data-usage-segment\s*'
+        r'data-model="([^"]+)"\s*data-requests="(\d+)"',
+        html,
+    ):
+        result["usage"]["models"].append({
+            "model": m.group(2),
+            "requests": int(m.group(3)),
+            "percent": round(float(m.group(1)), 1),
+        })
 
     return result
 
 
 def format_output(data: dict, verbose: bool = False) -> str:
     """Форматирует данные для красивого вывода."""
-    lines = []
-    lines.append(f"Ollama Cloud Usage ({data['plan']} plan)")
+    u = data["usage"]
+    lines = [f"Ollama Cloud Included Usage ({data['plan']} plan)"]
     lines.append("")
 
-    s = data["session"]
-    w = data["weekly"]
+    bar = _make_bar(u["percent"])
+    reset = _format_reset(u["resets_at"])
+    lines.append(f"Included usage: {u['percent']}% used (resets {reset})")
+    lines.append(f"  {bar}")
 
-    # Session
-    session_bar = _make_bar(s["percent"])
-    reset_s = _format_reset(s["resets_at"])
-    lines.append(f"Session: {s['percent']}% used (resets {reset_s})")
-    lines.append(f"  {session_bar}")
-
-    if verbose and s["models"]:
-        total_req = sum(m["requests"] for m in s["models"])
-        for m in sorted(s["models"], key=lambda x: x["requests"], reverse=True):
-            pct = round(m["requests"] / total_req * 100, 1) if total_req else 0
-            lines.append(f"  {m['model']}: {m['requests']} requests ({pct}%)")
-
-    lines.append("")
-
-    # Weekly
-    weekly_bar = _make_bar(w["percent"])
-    reset_w = _format_reset(w["resets_at"])
-    lines.append(f"Weekly: {w['percent']}% used (resets {reset_w})")
-    lines.append(f"  {weekly_bar}")
-
-    if verbose and w["models"]:
-        total_req = sum(m["requests"] for m in w["models"])
-        for m in sorted(w["models"], key=lambda x: x["requests"], reverse=True):
-            pct = round(m["requests"] / total_req * 100, 1) if total_req else 0
-            lines.append(f"  {m['model']}: {m['requests']} requests ({pct}%)")
+    if verbose and u["models"]:
+        lines.append("")
+        for model in sorted(u["models"], key=lambda x: x["percent"], reverse=True):
+            lines.append(
+                f"  {model['model']}: {model['requests']} requests "
+                f"({model['percent']}% of usage)"
+            )
 
     return "\n".join(lines)
 
@@ -211,8 +143,11 @@ def _format_reset(iso_time: str | None) -> str:
         total_seconds = int(diff.total_seconds())
         if total_seconds <= 0:
             return "now"
-        hours = total_seconds // 3600
+        days = total_seconds // 86400
+        hours = (total_seconds % 86400) // 3600
         minutes = (total_seconds % 3600) // 60
+        if days > 0:
+            return f"in {days}d {hours}h" if hours else f"in {days}d"
         if hours > 0:
             return f"in {hours}h {minutes}m" if minutes else f"in {hours}h"
         return f"in {minutes}m"
@@ -276,8 +211,7 @@ def main():
 
     # Получаем и парсим данные
     html = fetch_page(SETTINGS_URL, cookie)
-    billing_html = fetch_page(BILLING_URL, cookie)
-    data = parse_usage(html, billing_html)
+    data = parse_usage(html)
 
     # Режим записи в файл (для дашборда)
     if args.output_file:
