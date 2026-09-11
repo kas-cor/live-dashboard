@@ -29,7 +29,7 @@
   --accent: #0077ff;
   --accent-secondary: #e040a0;
   --success: #00b86b;
-  --warning: #e6a800;
+  --warning: #92400e;
   --danger: #e03050;
   --text-primary: #1a1a2e;
   --text-secondary: #6b7280;
@@ -909,7 +909,7 @@ body::before {
   padding-top: 6px;
   border-top: 1px solid var(--border);
   font-size: 11px;
-  color: #ffcc00;
+  color: var(--warning);
 }
 
 .ollama-depletion.active {
