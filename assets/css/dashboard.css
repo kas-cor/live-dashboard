@@ -903,6 +903,19 @@ body::before {
   margin-left: 8px;
 }
 
+.ollama-depletion {
+  display: none;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: #ffcc00;
+}
+
+.ollama-depletion.active {
+  display: block;
+}
+
 .models-header {
   font-size: 11px;
   font-weight: 600;

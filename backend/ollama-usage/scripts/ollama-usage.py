@@ -25,11 +25,15 @@ import os
 import re
 import sys
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 SETTINGS_URL = "https://ollama.com/settings"
 COOKIE_NAME = "__Secure-session"
 DEFAULT_COOKIE_FILE = os.path.expanduser("~/.hermes/scripts/.ollama-session-cookie")
+
+# Длина месячного пула Included usage. Сброс ("Resets in 4 weeks") —
+# начало следующего периода, поэтому прошедшая часть = PERIOD_DAYS − остаток.
+PERIOD_DAYS = 30.0
 
 
 def fetch_page(url: str, cookie_value: str) -> str:
@@ -63,7 +67,7 @@ def parse_usage(html: str) -> dict:
     result = {
         "plan": "unknown",
         "usage": {"percent": 0, "used": None, "limit": None, "currency": None,
-                  "resets_at": None, "models": []},
+                  "resets_at": None, "depletes_at": None, "models": []},
         "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
@@ -124,7 +128,55 @@ def parse_usage(html: str) -> dict:
             "percent": round(float(m.group(1)), 1),
         })
 
+    result["usage"]["depletes_at"] = _project_depletion(
+        percent=result["usage"]["percent"],
+        resets_at=result["usage"]["resets_at"],
+        fetched_at=result["fetched_at"],
+    )
+
     return result
+
+
+def _project_depletion(percent: float, resets_at: str | None,
+                       fetched_at: str) -> str | None:
+    """Прогноз даты исчерпания пула по среднему расходу за прошедший период.
+
+    Средний расход = percent / прошедшая_доля_периода. Если текущий темп
+    не успевает потратить пул до сброса — возвращает None (пул переживёт
+    период). Прогноз раньше момента сброса считается валидным, позже — нет.
+    """
+    if not resets_at or not percent:
+        return None
+    try:
+        reset_dt = datetime.fromisoformat(resets_at.replace("Z", "+00:00"))
+        now = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    period_seconds = (reset_dt - now).total_seconds()
+    if period_seconds <= 0:
+        return None
+
+    # Прошедшая доля периода: пул месячный, сброс — начало следующего.
+    elapsed_days = PERIOD_DAYS - period_seconds / 86400.0
+    if elapsed_days <= 0:
+        return None
+
+    remaining_percent = 100.0 - percent
+    if remaining_percent <= 0:
+        return now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    rate_per_day = percent / elapsed_days  # % пула в день
+    if rate_per_day <= 0:
+        return None
+
+    days_left = remaining_percent / rate_per_day
+    depletes_at = now + timedelta(days=days_left)
+
+    # Прогноз имеет смысл только если пул кончится до сброса
+    if depletes_at >= reset_dt:
+        return None
+    return depletes_at.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def format_output(data: dict, verbose: bool = False) -> str:
@@ -141,6 +193,12 @@ def format_output(data: dict, verbose: bool = False) -> str:
         amount = f" — {cur}{u['used']:g} of {cur}{u['limit']:g}"
     lines.append(f"Included usage: {u['percent']}% used{amount} (resets {reset})")
     lines.append(f"  {bar}")
+
+    if u.get("depletes_at"):
+        lines.append(
+            f"Projected depletion: {_format_reset(u['depletes_at'])} "
+            f"(at current average rate)"
+        )
 
     if verbose and u["models"]:
         lines.append("")

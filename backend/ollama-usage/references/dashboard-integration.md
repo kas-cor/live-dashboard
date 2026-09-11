@@ -34,6 +34,7 @@ Endpoint просто отдаёт содержимое `data/ollama-usage.json`
     "limit": 60.0,
     "currency": "$",
     "resets_at": "2026-10-10T19:49:02Z",
+    "depletes_at": "2026-09-20T11:20:12Z",
     "models": [
       { "model": "glm-5.3-flash", "requests": 224, "percent": 100.0 }
     ]
@@ -43,7 +44,9 @@ Endpoint просто отдаёт содержимое `data/ollama-usage.json`
 ```
 
 `used` / `limit` / `currency` заполняются только на платных тарифах
-(разметка `$X of $Y`); на free там `null`. Подробнее — `backend/ollama-usage/SKILL.md`.
+(разметка `$X of $Y`); на free там `null`. `depletes_at` — прогноз
+исчерпания пула по среднему расходу за прошедшую часть периода
+(`null`, если пул переживёт период). Подробнее — `backend/ollama-usage/SKILL.md`.
 
 ## Docker volume mount (`docker-compose.yml`)
 
