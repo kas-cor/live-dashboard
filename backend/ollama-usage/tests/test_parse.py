@@ -131,5 +131,46 @@ class TestPlanAndAmounts(unittest.TestCase):
         self.assertIsNone(mod._parse_amount("abc"))
 
 
+class TestDepletionProjection(unittest.TestCase):
+    """Прогноз исчерпания пула по среднему расходу за прошедший период."""
+
+    NOW = "2026-09-11T00:00:00Z"
+
+    def test_projects_before_reset(self):
+        # 20% за 3 дня (осталось 27д из 30) → 6.67%/день → 80% хватит на 12д,
+        # то есть пул кончится до сброса → прогноз есть и он раньше сброса.
+        resets = "2026-10-08T00:00:00Z"  # через 27 дней
+        got = mod._project_depletion(20.0, resets, self.NOW)
+        self.assertIsNotNone(got)
+        self.assertLess(got, resets)
+
+    def test_none_exactly_at_boundary(self):
+        # 10% за 3 дня → 3.33%/день → 90% хватит ровно на 27д = момент сброса.
+        # Пул не исчерпается до сброса → прогноза нет.
+        self.assertIsNone(
+            mod._project_depletion(10.0, "2026-10-08T00:00:00Z", self.NOW)
+        )
+
+    def test_none_when_outlasts_period(self):
+        # 1% за 3 дня → пул не успеет кончиться до сброса
+        self.assertIsNone(mod._project_depletion(1.0, "2026-10-08T00:00:00Z", self.NOW))
+
+    def test_none_without_inputs(self):
+        self.assertIsNone(mod._project_depletion(0.0, "2026-10-08T00:00:00Z", self.NOW))
+        self.assertIsNone(mod._project_depletion(10.0, None, self.NOW))
+        self.assertIsNone(mod._project_depletion(10.0, "not-a-date", self.NOW))
+
+    def test_exhausted_returns_now(self):
+        got = mod._project_depletion(100.0, "2026-10-08T00:00:00Z", self.NOW)
+        self.assertEqual(got, self.NOW)
+
+    def test_early_period_is_aggressive(self):
+        # 5% за ~0.5 дня → 10%/день → исчерпание примерно через 9.5 дней
+        resets = "2026-10-10T12:00:00Z"  # через 29.5 дней
+        got = mod._project_depletion(5.0, resets, self.NOW)
+        self.assertIsNotNone(got)
+        self.assertTrue(got.startswith("2026-09-20"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

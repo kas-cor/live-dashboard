@@ -47,6 +47,7 @@ backend/ollama-usage/
     "limit": 60.0,
     "currency": "$",
     "resets_at": "2026-10-10T19:49:02Z",
+    "depletes_at": "2026-09-20T11:20:12Z",
     "models": [
       { "model": "glm-5.3-flash", "requests": 224, "percent": 100.0 }
     ]
@@ -60,6 +61,8 @@ backend/ollama-usage/
 - `usage.used` / `usage.limit` / `usage.currency` — абсолютный расход
   (`$1.39 of $60`); есть только на платных тарифах, на free — `null`
 - `usage.resets_at` — дата сброса пула (строка "Resets in ...")
+- `usage.depletes_at` — прогноз исчерпания пула по среднему расходу за
+  прошедшую часть периода; `null`, если пул переживёт период
 - `usage.models` — модели месяца: `requests` (кол-во запросов) и `percent` (доля usage из трека)
 
 ### Разметка тарифов (важно для парсинга)

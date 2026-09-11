@@ -35,6 +35,7 @@ class OllamaUsageWidget extends BaseWidget {
             <div class="models-header">Models this month</div>
             <div class="models-list"></div>
           </div>
+          <div class="ollama-depletion"></div>
         </div>
       </div>
     `;
@@ -135,6 +136,19 @@ class OllamaUsageWidget extends BaseWidget {
           <span class="model-reqs">${m.requests}</span>
         </div>`;
       }).join('');
+    }
+
+    // Projected depletion — avg burn rate over the elapsed part of the period
+    const depleteEl = body.querySelector('.ollama-depletion');
+    if (depleteEl) {
+      const abs = fmtAbsReset(usage.depletes_at);
+      if (abs) {
+        depleteEl.textContent = `⚠ Projected depletion: ${abs} (${fmtReset(usage.depletes_at)})`;
+        depleteEl.classList.add('active');
+      } else {
+        depleteEl.textContent = '';
+        depleteEl.classList.remove('active');
+      }
     }
 
     this.element.querySelector('.last-update').textContent = new Date().toLocaleTimeString();
