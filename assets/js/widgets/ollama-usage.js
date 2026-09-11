@@ -27,6 +27,7 @@ class OllamaUsageWidget extends BaseWidget {
               <div class="metric">
                 <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
                 <span class="metric-value usage-value">--%</span>
+                <span class="metric-amount usage-amount"></span>
               </div>
             </div>
           </div>
@@ -98,6 +99,18 @@ class OllamaUsageWidget extends BaseWidget {
       else bar.style.background = '#00ff88';
     }
     if (valEl) valEl.textContent = usagePct + '%';
+
+    // Absolute spend (pro/max plans expose "$X of $Y" instead of a percent)
+    const amountEl = body.querySelector('.usage-amount');
+    if (amountEl) {
+      if (usage.used != null && usage.limit != null) {
+        const cur = usage.currency || '';
+        const fmt = (n) => Number.isInteger(n) ? n : n.toFixed(2);
+        amountEl.textContent = `${cur}${fmt(usage.used)} / ${cur}${fmt(usage.limit)}`;
+      } else {
+        amountEl.textContent = '';
+      }
+    }
 
     // Reset time in header: absolute (local) + relative in parens
     const resetEl = body.querySelector('.usage-reset');

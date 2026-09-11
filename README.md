@@ -37,7 +37,7 @@ docker compose up -d
 | Crypto | 1min | CoinGecko API | BTC/ETH/XMR prices + 24h change |
 | Network | 2s | HTTP HEAD | Online status check |
 | System Load | 3s | FastAPI | CPU, RAM, Disk, uptime, load |
-| **Ollama Cloud** | **30s** | **FastAPI** | **Session/weekly usage, top models, subscription** |
+| **Ollama Cloud** | **30s** | **FastAPI** | **Monthly included usage (percent + spend), top models** |
 | Server Status | 15s | SSH | Remote server metrics |
 | Sites | 1min | HTTP GET | Website uptime monitoring |
 | TODO | 30s | JSON file | Task list |

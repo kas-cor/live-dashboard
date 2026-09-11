@@ -62,7 +62,8 @@ def parse_usage(html: str) -> dict:
     """Парсит HTML /settings и возвращает месячный пул Included usage."""
     result = {
         "plan": "unknown",
-        "usage": {"percent": 0, "resets_at": None, "models": []},
+        "usage": {"percent": 0, "used": None, "limit": None, "currency": None,
+                  "resets_at": None, "models": []},
         "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
@@ -74,13 +75,34 @@ def parse_usage(html: str) -> dict:
     if plan_match:
         result["plan"] = plan_match.group(1).lower()
 
-    # Общий процент использованного Included usage за месяц
-    pct_match = re.search(
-        r'data-usage-track\s+aria-label="[^"]*?([\d.]+)%\s*used"',
-        html,
-    )
-    if pct_match:
-        result["usage"]["percent"] = round(float(pct_match.group(1)), 1)
+    # Общий процент использованного Included usage за месяц.
+    # Разметка зависит от тарифа: free показывает проценты
+    # ("... 3% used"), pro — деньги ("Monthly usage $1.39 of $60 used").
+    # Инвариант для обоих — ширина заливки трека; проценты берём из неё,
+    # а из aria-label дополнительно вытаскиваем абсолютные значения.
+    aria_match = re.search(r'data-usage-track\s+aria-label="([^"]*)"', html)
+    if aria_match:
+        aria = aria_match.group(1)
+        pct = re.search(r"([\d.]+)%\s*used", aria)
+        if pct:
+            result["usage"]["percent"] = round(float(pct.group(1)), 1)
+        money = re.search(
+            r"([$€£])\s*([\d.,]+)\s+of\s+([$€£])?\s*([\d.,]+)", aria
+        )
+        if money:
+            result["usage"]["currency"] = money.group(1)
+            result["usage"]["used"] = _parse_amount(money.group(2))
+            result["usage"]["limit"] = _parse_amount(money.group(4))
+
+    # Fallback: процент из ширины заливки трека (тариф-независимо)
+    if not result["usage"]["percent"]:
+        fill_match = re.search(
+            r'data-usage-track[^>]*>\s*<div[^>]*style="width:\s*([\d.]+)%',
+            html,
+            re.DOTALL,
+        )
+        if fill_match:
+            result["usage"]["percent"] = round(float(fill_match.group(1)), 1)
 
     # Дата сброса (строка "Resets in ..." с data-time рядом)
     reset_match = re.search(
@@ -113,7 +135,11 @@ def format_output(data: dict, verbose: bool = False) -> str:
 
     bar = _make_bar(u["percent"])
     reset = _format_reset(u["resets_at"])
-    lines.append(f"Included usage: {u['percent']}% used (resets {reset})")
+    amount = ""
+    if u.get("used") is not None and u.get("limit") is not None:
+        cur = u.get("currency") or ""
+        amount = f" — {cur}{u['used']:g} of {cur}{u['limit']:g}"
+    lines.append(f"Included usage: {u['percent']}% used{amount} (resets {reset})")
     lines.append(f"  {bar}")
 
     if verbose and u["models"]:
@@ -125,6 +151,23 @@ def format_output(data: dict, verbose: bool = False) -> str:
             )
 
     return "\n".join(lines)
+
+
+def _parse_amount(raw: str) -> float | None:
+    """Парсит денежную сумму из aria-label ("1.39" / "1,39" / "1,234.56")."""
+    s = raw.strip()
+    if "," in s and "." in s:
+        # Разделитель тысяч — тот, что левее
+        if s.rindex(",") < s.rindex("."):
+            s = s.replace(",", "")
+        else:
+            s = s.replace(".", "").replace(",", ".")
+    else:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 def _make_bar(percent: float, width: int = 40) -> str:

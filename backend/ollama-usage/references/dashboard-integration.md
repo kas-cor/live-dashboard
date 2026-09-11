@@ -27,18 +27,23 @@ Endpoint просто отдаёт содержимое `data/ollama-usage.json`
 
 ```json
 {
-  "plan": "free",
+  "plan": "pro",
   "usage": {
-    "percent": 0.4,
-    "resets_at": "2026-10-04T05:11:16Z",
+    "percent": 2.3,
+    "used": 1.39,
+    "limit": 60.0,
+    "currency": "$",
+    "resets_at": "2026-10-10T19:49:02Z",
     "models": [
-      { "model": "nemotron-3-super", "requests": 5, "percent": 78.6 },
-      { "model": "gpt-oss:120b", "requests": 1, "percent": 21.4 }
+      { "model": "glm-5.3-flash", "requests": 224, "percent": 100.0 }
     ]
   },
-  "fetched_at": "2026-09-09T08:09:38Z"
+  "fetched_at": "2026-09-11T06:59:51Z"
 }
 ```
+
+`used` / `limit` / `currency` заполняются только на платных тарифах
+(разметка `$X of $Y`); на free там `null`. Подробнее — `backend/ollama-usage/SKILL.md`.
 
 ## Docker volume mount (`docker-compose.yml`)
 
