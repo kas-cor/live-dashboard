@@ -970,7 +970,8 @@ def ollama_usage():
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"error": "no_data", "plan": "unknown",
-                "usage": {"percent": 0, "resets_at": None, "models": []},
+                "usage": {"percent": 0, "used": None, "limit": None,
+                          "currency": None, "resets_at": None, "models": []},
                 "fetched_at": None}
 
     return data

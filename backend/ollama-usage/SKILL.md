@@ -26,6 +26,8 @@ backend/ollama-usage/
 ├── scripts/
 │   ├── ollama-usage.py               # основной скрипт парсинга
 │   └── ollama-usage-dashboard.sh     # обёртка для cron
+├── tests/
+│   └── test_parse.py                 # тесты парсера (free + pro разметка)
 └── references/
     ├── ollama-usage-widget.js        # виджет для дашборда
     └── dashboard-integration.md      # инструкция по интеграции
@@ -38,23 +40,40 @@ backend/ollama-usage/
 Структура:
 ```json
 {
-  "plan": "free",
+  "plan": "pro",
   "usage": {
-    "percent": 0.4,
-    "resets_at": "2026-10-04T05:11:16Z",
+    "percent": 2.3,
+    "used": 1.39,
+    "limit": 60.0,
+    "currency": "$",
+    "resets_at": "2026-10-10T19:49:02Z",
     "models": [
-      { "model": "nemotron-3-super", "requests": 5, "percent": 78.6 },
-      { "model": "gpt-oss:120b", "requests": 1, "percent": 21.4 }
+      { "model": "glm-5.3-flash", "requests": 224, "percent": 100.0 }
     ]
   },
-  "fetched_at": "2026-09-09T08:09:38Z"
+  "fetched_at": "2026-09-11T06:59:51Z"
 }
 ```
 
 - `plan` — бейдж тарифа (`free` / `pro` / `max`) рядом с "Included usage"
 - `usage.percent` — процент месячного Included usage, уже использованный
+- `usage.used` / `usage.limit` / `usage.currency` — абсолютный расход
+  (`$1.39 of $60`); есть только на платных тарифах, на free — `null`
 - `usage.resets_at` — дата сброса пула (строка "Resets in ...")
 - `usage.models` — модели месяца: `requests` (кол-во запросов) и `percent` (доля usage из трека)
+
+### Разметка тарифов (важно для парсинга)
+
+Разметка `/settings` отличается между free и платными тарифами:
+
+| Тариф | `aria-label` трека | Процент |
+|-------|--------------------|---------|
+| free  | `Monthly usage 3% used` | в тексте |
+| pro/max | `Monthly usage $1.39 of $60 used` | только в ширине заливки |
+
+Инвариант для обоих — `style="width: N%"` у заливки внутри `data-usage-track`.
+Парсер берёт процент из `aria-label`, а если там денежный формат — из ширины
+заливки, и дополнительно вытаскивает `used`/`limit`/`currency` из `aria-label`.
 
 ## Как это работает
 
