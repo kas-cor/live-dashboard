@@ -972,7 +972,7 @@ def ollama_usage():
         return {"error": "no_data", "plan": "unknown",
                 "usage": {"percent": 0, "used": None, "limit": None,
                           "currency": None, "resets_at": None,
-                          "depletes_at": None, "models": []},
+                          "depletes_at": None, "models": [], "forecast": {}},
                 "fetched_at": None}
 
     return data

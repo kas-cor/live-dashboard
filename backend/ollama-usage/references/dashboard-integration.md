@@ -36,17 +36,28 @@ Endpoint просто отдаёт содержимое `data/ollama-usage.json`
     "resets_at": "2026-10-10T19:49:02Z",
     "depletes_at": "2026-09-20T11:20:12Z",
     "models": [
-      { "model": "glm-5.3-flash", "requests": 224, "percent": 100.0 }
-    ]
+      { "model": "glm-5.3-flash", "requests": 224, "percent": 100.0,
+        "cost_usd": 2.28 }
+    ],
+    "forecast": {
+      "basis": "usd", "burn_usd_per_day": 6.89,
+      "days_left": 7.87, "lasts_full_cycle": false,
+      "deficit_days": 21.3, "shortfall_usd": 146.86,
+      "reduction_factor": 3.7, "sustainable_usd_per_day": 1.86,
+      "cost_breakdown": { "weighted_cost_usd": 3.93, "calibration": 1.45 }
+    }
   },
   "fetched_at": "2026-09-11T06:59:51Z"
 }
 ```
 
 `used` / `limit` / `currency` заполняются только на платных тарифах
-(разметка `$X of $Y`); на free там `null`. `depletes_at` — прогноз
-исчерпания пула по среднему расходу за прошедшую часть периода
-(`null`, если пул переживёт период). Подробнее — `backend/ollama-usage/SKILL.md`.
+(разметка `$X of $Y`); на free там `null`. `depletes_at` и `forecast` —
+прогноз исчерпания пула (ядро `scripts/ollama_forecast.py`): темп в $/день,
+дефицит до сброса, коэффициент сокращения, структура стоимости по типам
+токенов. Виджет показывает `depletes_at`, `forecast.burn_usd_per_day`,
+`forecast.deficit_days` и `models[].cost_usd`.
+Подробнее — `backend/ollama-usage/SKILL.md`.
 
 ## Docker volume mount (`docker-compose.yml`)
 
@@ -83,5 +94,6 @@ dashboard.register(new OllamaUsageWidget('ollama-usage', {
 .model-name { flex: 0 0 auto; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
 .model-bar-track { flex: 1; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
 .model-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.5s ease; }
+.model-cost { flex: 0 0 46px; text-align: right; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 10px; }
 .model-reqs { flex: 0 0 40px; text-align: right; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 10px; }
 ```
