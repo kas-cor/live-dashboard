@@ -129,10 +129,12 @@ class OllamaUsageWidget extends BaseWidget {
       modelsList.innerHTML = sorted.map(m => {
         const pct = m.percent || 0;
         const barW = maxPct > 0 ? Math.max(pct / maxPct * 90, 2) : 2;
-        const reqLabel = m.requests === 1 ? 'request' : 'requests';
+        // Absolute spend per model (site gives the share, forecast adds $)
+        const cost = m.cost_usd != null ? `$${m.cost_usd.toFixed(2)}` : '';
         return `<div class="model-row">
           <span class="model-name" title="${m.model}">${m.model}</span>
           <div class="model-bar-track"><div class="model-bar-fill" style="width:${barW}%"></div></div>
+          <span class="model-cost">${cost}</span>
           <span class="model-reqs">${m.requests}</span>
         </div>`;
       }).join('');
@@ -141,9 +143,26 @@ class OllamaUsageWidget extends BaseWidget {
     // Projected depletion — avg burn rate over the elapsed part of the period
     const depleteEl = body.querySelector('.ollama-depletion');
     if (depleteEl) {
+      const fc = usage.forecast || {};
+      const lines = [];
       const abs = fmtAbsReset(usage.depletes_at);
       if (abs) {
-        depleteEl.textContent = `⚠ Projected depletion: ${abs} (${fmtReset(usage.depletes_at)})`;
+        lines.push(`⚠ Projected depletion: ${abs} (${fmtReset(usage.depletes_at)})`);
+      } else if (fc.lasts_full_cycle) {
+        lines.push(`✅ Pool outlasts the period (${fc.left_days}d to reset)`);
+      }
+      // Burn rate in $/day — basis for the projection
+      if (fc.burn_usd_per_day != null) {
+        lines.push(`🔥 Burn: $${fc.burn_usd_per_day}/day over ${fc.elapsed_days}d`);
+      }
+      // Shortfall: how much the rate must drop to survive until reset
+      if (fc.deficit_days) {
+        const cut = fc.reduction_factor ? ` · cut ×${fc.reduction_factor}` : '';
+        const need = fc.sustainable_usd_per_day != null ? ` → $${fc.sustainable_usd_per_day}/day` : '';
+        lines.push(`⚠ Short by ${fc.deficit_days}d${cut}${need}`);
+      }
+      if (lines.length) {
+        depleteEl.innerHTML = lines.map(t => `<div class="ollama-depletion-line">${t}</div>`).join('');
         depleteEl.classList.add('active');
       } else {
         depleteEl.textContent = '';

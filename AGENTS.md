@@ -90,6 +90,7 @@ curl -X POST 'http://localhost:9090/api/alert' \
 | PUT | `/api/config/{id}` | Save config |
 | DELETE | `/api/config/{id}` | Delete config |
 | POST | `/api/alert` | Trigger custom alert |
+| GET | `/api/parsec-save` | Parsec proxy savings — windows `24h`/`7d`/`all`, per-model breakdown (`?window=24h`, `?refresh=1`) |
 
 ## Threshold Config via API
 ```bash

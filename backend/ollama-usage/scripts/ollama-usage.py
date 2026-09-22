@@ -14,9 +14,13 @@ Session/Weekly теперь единый месячный пул "Included usage
   python3 ollama-usage.py --cookie-file <path>     # кука из файла
   python3 ollama-usage.py --cookie <value>         # кука из аргумента
   python3 ollama-usage.py --output-file <path>     # запись JSON в файл
+  python3 ollama-usage.py --no-tokens              # без разбора токенов (быстро)
   python3 ollama-usage.py --save-cookie <value>    # сохранить куку
 
 Формат cookie-file: первая строка — значение __Secure-session
+
+Прогноз исчерпания пула считает модуль `ollama_forecast.py` — он же общий
+для CLI-отчёта. Виджет дашборда показывает готовые поля из JSON.
 """
 
 import argparse
@@ -25,15 +29,16 @@ import os
 import re
 import sys
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+
+# Ядро прогноза живёт рядом; импорт по пути файла, чтобы работало
+# и при загрузке модуля через importlib (тесты), и при прямом запуске.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ollama_forecast as forecast  # noqa: E402
 
 SETTINGS_URL = "https://ollama.com/settings"
 COOKIE_NAME = "__Secure-session"
 DEFAULT_COOKIE_FILE = os.path.expanduser("~/.hermes/scripts/.ollama-session-cookie")
-
-# Длина месячного пула Included usage. Сброс ("Resets in 4 weeks") —
-# начало следующего периода, поэтому прошедшая часть = PERIOD_DAYS − остаток.
-PERIOD_DAYS = 30.0
 
 
 def fetch_page(url: str, cookie_value: str) -> str:
@@ -137,46 +142,38 @@ def parse_usage(html: str) -> dict:
     return result
 
 
+def enrich_forecast(data: dict, with_tokens: bool = True) -> dict:
+    """Дополняет данные прогноза полями расчёта (мутирует и возвращает data).
+
+    В `usage.forecast` кладётся полный разбор: темп в $/день, дефицит,
+    коэффициент сокращения, структура стоимости по типам токенов.
+    `usage.depletes_at` остаётся для совместимости с виджетом.
+    """
+    usage = data["usage"]
+    usage["forecast"] = forecast.build_forecast(
+        usage,
+        data["fetched_at"],
+        tokens_root=None if not with_tokens else forecast.DEFAULT_PROFILES_ROOT,
+    )
+    # depletes_at из нового расчёта перекрывает линейную оценку
+    usage["depletes_at"] = usage["forecast"].get("depletes_at")
+    usage["models"] = forecast.annotate_models(usage.get("models") or [], usage.get("used"))
+    return data
+
+
 def _project_depletion(percent: float, resets_at: str | None,
                        fetched_at: str) -> str | None:
-    """Прогноз даты исчерпания пула по среднему расходу за прошедший период.
+    """Дата исчерпания пула по проценту — тонкая обёртка над ядром прогноза.
 
-    Средний расход = percent / прошедшая_доля_периода. Если текущий темп
-    не успевает потратить пул до сброса — возвращает None (пул переживёт
-    период). Прогноз раньше момента сброса считается валидным, позже — нет.
+    Оставлена для обратной совместимости (её проверяют тесты парсера).
+    Вся математика — в `ollama_forecast.build_forecast`; здесь только
+    приведение процентного базиса к общей сигнатуре.
     """
-    if not resets_at or not percent:
-        return None
-    try:
-        reset_dt = datetime.fromisoformat(resets_at.replace("Z", "+00:00"))
-        now = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-    period_seconds = (reset_dt - now).total_seconds()
-    if period_seconds <= 0:
-        return None
-
-    # Прошедшая доля периода: пул месячный, сброс — начало следующего.
-    elapsed_days = PERIOD_DAYS - period_seconds / 86400.0
-    if elapsed_days <= 0:
-        return None
-
-    remaining_percent = 100.0 - percent
-    if remaining_percent <= 0:
-        return now.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    rate_per_day = percent / elapsed_days  # % пула в день
-    if rate_per_day <= 0:
-        return None
-
-    days_left = remaining_percent / rate_per_day
-    depletes_at = now + timedelta(days=days_left)
-
-    # Прогноз имеет смысл только если пул кончится до сброса
-    if depletes_at >= reset_dt:
-        return None
-    return depletes_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    result = forecast.build_forecast(
+        {"percent": percent, "used": None, "limit": None, "resets_at": resets_at},
+        fetched_at,
+    )
+    return result.get("depletes_at")
 
 
 def format_output(data: dict, verbose: bool = False) -> str:
@@ -194,18 +191,47 @@ def format_output(data: dict, verbose: bool = False) -> str:
     lines.append(f"Included usage: {u['percent']}% used{amount} (resets {reset})")
     lines.append(f"  {bar}")
 
+    fc = u.get("forecast") or {}
+    if fc.get("burn_usd_per_day") is not None:
+        lines.append(
+            f"Burn rate: ${fc['burn_usd_per_day']}/day "
+            f"({fc.get('burn_pct_per_day')}%/day) over {fc.get('elapsed_days')}d elapsed"
+        )
     if u.get("depletes_at"):
         lines.append(
             f"Projected depletion: {_format_reset(u['depletes_at'])} "
-            f"(at current average rate)"
+            f"(in {fc.get('days_left')}d at current rate)"
         )
+    elif fc.get("lasts_full_cycle"):
+        lines.append(f"Projected depletion: pool outlasts the period "
+                     f"({fc.get('left_days')}d to reset)")
+    if fc.get("deficit_days"):
+        lines.append(
+            f"⚠ Shortfall: {fc['deficit_days']}d before reset, "
+            f"~${fc.get('shortfall_usd')} extra needed; "
+            f"cut usage ×{fc.get('reduction_factor')} "
+            f"(to ${fc.get('sustainable_usd_per_day')}/day)"
+        )
+
+    cb = fc.get("cost_breakdown")
+    if cb:
+        lines.append("")
+        lines.append("Cost by token type (with peak rates):")
+        lines.append(f"  input:  {cb['total_in'] / 1e6:.1f}M → ${cb['cost_in_usd']}")
+        lines.append(f"  output: {cb['total_out'] / 1e6:.2f}M → ${cb['cost_out_usd']}")
+        lines.append(f"  cache:  {cb['total_cache'] / 1e6:.1f}M → ${cb['cost_cache_usd']}")
+        lines.append(f"  total:  ${cb['weighted_cost_usd']}")
+        if cb.get("calibration"):
+            lines.append(f"  calibration vs site: ×{cb['calibration']}")
 
     if verbose and u["models"]:
         lines.append("")
-        for model in sorted(u["models"], key=lambda x: x["percent"], reverse=True):
+        for model in sorted(u["models"], key=lambda x: x.get("percent") or 0, reverse=True):
+            cost = model.get("cost_usd")
+            cost_str = f" — ${cost}" if cost is not None else ""
             lines.append(
                 f"  {model['model']}: {model['requests']} requests "
-                f"({model['percent']}% of usage)"
+                f"({model['percent']}% of usage){cost_str}"
             )
 
     return "\n".join(lines)
@@ -287,6 +313,8 @@ def main():
                         help=f"Путь для сохранения куки (по умолч.: {DEFAULT_COOKIE_FILE})")
     parser.add_argument("--output-file", type=str,
                         help="Записать JSON в файл (для дашборда)")
+    parser.add_argument("--no-tokens", action="store_true",
+                        help="Не разбирать токены из state.db (быстрее)")
 
     args = parser.parse_args()
 
@@ -313,6 +341,7 @@ def main():
     # Получаем и парсим данные
     html = fetch_page(SETTINGS_URL, cookie)
     data = parse_usage(html)
+    data = enrich_forecast(data, with_tokens=not args.no_tokens)
 
     # Режим записи в файл (для дашборда)
     if args.output_file:

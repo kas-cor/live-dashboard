@@ -97,6 +97,12 @@ ALERT_CHECK_INTERVAL = int(os.environ.get("ALERT_CHECK_INTERVAL", "60"))
 ALERT_COOLDOWN_SECS = int(os.environ.get("ALERT_COOLDOWN_MINUTES", "10")) * 60
 ALERT_CONSECUTIVE_THRESHOLD = int(os.environ.get("ALERT_CONSECUTIVE_THRESHOLD", "3"))
 ALERT_CONSECUTIVE_TIMEOUT_SECS = int(os.environ.get("ALERT_CONSECUTIVE_TIMEOUT_SECS", "300"))
+# One "check cycle" is the interval on which the background loop evaluates all
+# alert conditions. The HTTP endpoints evaluate the same conditions too (browser
+# widgets refetch them), so a single observation can be evaluated several times
+# within milliseconds. The consecutive-hits counter must advance at most once per
+# cycle: otherwise a lone transient blip is amplified into a full alert.
+ALERT_CYCLE_SECS = max(ALERT_CHECK_INTERVAL, 30)
 
 class AlertService:
     def __init__(self):
@@ -140,6 +146,17 @@ class AlertService:
     def reset_cooldown(self, alert_key: str):
         self._delete(alert_key)
 
+    def reset_streak(self, alert_key: str):
+        """Condition recovered: clear the consecutive-hit streak, keep the cooldown
+        (triggered_at) so a flapping condition can't re-alert before it expires."""
+        db = get_db()
+        db.execute(
+            "UPDATE alert_cooldowns SET consecutive_hits = 0, value = 0 WHERE alert_key = ?",
+            (alert_key,)
+        )
+        db.commit()
+        db.close()
+
     def _increment_consecutive(self, alert_key: str) -> tuple[bool, int]:
         """Increment consecutive counter atomically. Returns (should_alert, current_count)."""
         with self._lock:
@@ -164,8 +181,13 @@ class AlertService:
                 return False, hits
 
             if row:
-                # Check timeout — reset if too much time passed
                 last_hit = row["value"]
+                # Already counted for this cycle — report state, don't advance.
+                if last_hit and last_hit > 0 and (now - last_hit) < ALERT_CYCLE_SECS:
+                    hits = row["consecutive_hits"] or 0
+                    db.close()
+                    return False, hits
+                # Check timeout — reset if too much time passed
                 if last_hit and last_hit > 0 and (now - last_hit) > ALERT_CONSECUTIVE_TIMEOUT_SECS:
                     db.execute(
                         "UPDATE alert_cooldowns SET consecutive_hits = 1, value = ?, triggered_at = 0 WHERE alert_key = ?",
@@ -303,6 +325,9 @@ class AlertService:
         return alerts
 
     async def send_webhook(self, alerts: list[dict]):
+        # Pending markers (description is None) are frontend-only progress indicators
+        # (accumulating N/M). They must never be delivered as real alerts.
+        alerts = [a for a in alerts if a.get("description")]
         if not alerts:
             return
         webhook_url = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
@@ -819,6 +844,8 @@ def get_server_status():
             pending = alert_service.pending_alerts(sid, results[sid].get("name", sid),
                                                    "Server Status", metrics, config)
             results[sid]["alerts"] = pending
+            # Server answered — a previous availability streak is over.
+            alert_service.reset_streak(f"{sid}|Offline")
             if new_alerts:
                 _fire_webhook(new_alerts)
         else:
@@ -972,9 +999,84 @@ def ollama_usage():
         return {"error": "no_data", "plan": "unknown",
                 "usage": {"percent": 0, "used": None, "limit": None,
                           "currency": None, "resets_at": None,
-                          "depletes_at": None, "models": []},
+                          "depletes_at": None, "models": [], "forecast": {}},
                 "fetched_at": None}
 
+    return data
+
+
+# --- Parsec save tokens (live savings of the parsec proxy) ---
+# Read-only over the parsec ledger — nothing here talks to the proxy itself.
+PARSEC_SCRIPTS = os.environ.get("PARSEC_SCRIPTS", "/app/parsec-scripts")
+PARSEC_LEDGER = os.environ.get("PARSEC_LEDGER", "/parsec-data/ledger.jsonl")
+PARSEC_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(PARSEC_SCRIPTS, "ollama_prices.json"))
+PARSEC_CACHE_TTL = float(os.environ.get("PARSEC_CACHE_TTL", "5"))
+PARSEC_TOTALS_KEYS = (
+    "hours", "since", "requests", "measured_requests", "unmeasured_requests", "peak_requests",
+    "tokens_saved", "counterfactual_in", "usd_saved", "billed_in", "cache_read", "cache_write",
+    "output", "usd_cost", "saved_pct_of_counterfactual", "usd_saved_share_pct", "unpriced_models",
+)
+_parsec_module = None
+_parsec_cache = {"at": 0.0, "data": None}
+_parsec_lock = threading.Lock()
+
+
+def _parsec_savings_module():
+    """Load backend/parsec-save/scripts/parsec_savings.py by path (no install needed)."""
+    global _parsec_module
+    if _parsec_module is None:
+        import importlib.util
+        path = os.path.join(PARSEC_SCRIPTS, "parsec_savings.py")
+        spec = importlib.util.spec_from_file_location("parsec_savings", path)
+        if spec is None or spec.loader is None:
+            raise FileNotFoundError(path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _parsec_module = module
+    return _parsec_module
+
+
+def _parsec_report():
+    with _parsec_lock:
+        cached = _parsec_cache["data"]
+        if cached is not None and time.time() - _parsec_cache["at"] < PARSEC_CACHE_TTL:
+            return cached
+    data = _parsec_savings_module().compute(PARSEC_LEDGER, PARSEC_PRICES)
+    with _parsec_lock:
+        _parsec_cache["at"] = time.time()
+        _parsec_cache["data"] = data
+    return data
+
+
+@app.get("/api/parsec-save")
+def parsec_save(window: str = "", refresh: int = 0):
+    """Экономия parsec-прокси из ledger.jsonl — окна 24h / 7d / all, разбивка по моделям.
+
+    Без аргументов отдаёт все три окна. `?window=24h` дополнительно добавляет
+    `selected`/`selected_totals`, `?refresh=1` игнорирует 5-секундный кэш.
+    """
+    try:
+        if refresh:
+            with _parsec_lock:
+                _parsec_cache["data"] = None
+        data = _parsec_report()
+    except FileNotFoundError as exc:
+        return {"error": "no_ledger", "detail": str(exc), "ledger": PARSEC_LEDGER,
+                "generated_at": None, "windows": {}}
+    except Exception as exc:  # never take the dashboard down over a bad read
+        logging.warning("parsec-save: %s", exc)
+        return {"error": "parsec_savings_failed", "detail": str(exc),
+                "generated_at": None, "windows": {}}
+
+    data["cache_ttl"] = PARSEC_CACHE_TTL
+    if window:
+        selected = data.get("windows", {}).get(window)
+        if selected is None:
+            data["error"] = "unknown_window"
+            data["available_windows"] = sorted(data.get("windows", {}))
+        else:
+            data["selected"] = window
+            data["selected_totals"] = {k: selected.get(k) for k in PARSEC_TOTALS_KEYS}
     return data
 
 
@@ -1066,7 +1168,7 @@ if __name__ == "__main__":
 
     # Background alert loop — runs independently of frontend
     async def background_alert_loop():
-        loop_interval = max(ALERT_CHECK_INTERVAL, 30)
+        loop_interval = ALERT_CYCLE_SECS
         logger.info(f"Background alert loop started (interval={loop_interval}s)")
         while True:
             try:
