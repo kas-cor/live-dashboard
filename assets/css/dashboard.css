@@ -1121,3 +1121,128 @@ body::before {
   margin-top: 4px;
 }
 
+/* ── Parsec save tokens widget ─────────────────── */
+.parsec-windows {
+  display: inline-flex;
+  gap: 2px;
+  margin-right: 6px;
+}
+
+.parsec-window-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 1px 6px;
+  transition: all 0.15s ease;
+}
+
+.parsec-window-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.parsec-window-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-primary);
+  font-weight: 600;
+}
+
+.parsec-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.parsec-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.parsec-hero-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.parsec-hero-value {
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.parsec-hero-label {
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.parsec-hero-side {
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.parsec-hero-line {
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.5;
+}
+
+.parsec-usd-saved { color: var(--success); font-weight: 600; }
+.parsec-usd-cost { color: var(--warning); font-weight: 600; }
+
+.parsec-metrics {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.parsec-metric {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  min-width: 0;
+}
+
+.parsec-metric-label {
+  color: var(--text-secondary);
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.parsec-metric-value {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.parsec-metric-sub {
+  color: var(--text-secondary);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parsec-foot {
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 10px;
+  margin-top: 2px;
+  padding-top: 5px;
+}
+
