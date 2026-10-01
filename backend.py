@@ -4,6 +4,7 @@ Dashboard Backend API
 Provides system data for the dashboard widgets
 """
 import subprocess, json, os, time, re, sqlite3, threading
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
@@ -828,8 +829,22 @@ def get_server_status():
     if SERVER_CACHE["data"] and (now - SERVER_CACHE["ts"]) < 15:
         return SERVER_CACHE["data"]
     results = {}
-    for sid, cfg in SERVERS_CONFIG.items():
-        results[sid] = ssh_collect(cfg["host"], cfg["port"], cfg["user"])
+    # Collect the servers concurrently: sequentially, N unreachable hosts cost
+    # N × ConnectTimeout and blow past nginx's 10s proxy_read_timeout (504).
+    servers = list(SERVERS_CONFIG.items())
+    collected = []
+    if servers:
+        with ThreadPoolExecutor(max_workers=min(len(servers), 8)) as pool:
+            collected = list(pool.map(
+                lambda kv: ssh_collect(kv[1]["host"], kv[1]["port"], kv[1]["user"]),
+                servers))
+    for (sid, cfg), data in zip(servers, collected):
+        # ssh_collect returns None when the host answers with unparsable output.
+        if not isinstance(data, dict):
+            data = {"online": False, "cpu": 0, "ram": 0, "disk": 0, "uptime": "OFFLINE",
+                    "load1": 0, "load5": 0, "load15": 0, "cpu_model": "",
+                    "cpu_cores": 0, "total_ram": "0GB", "total_disk": ""}
+        results[sid] = data
         results[sid]["id"] = sid
         results[sid]["name"] = cfg["name"]
         # Server-side alert check for each server
