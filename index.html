@@ -29,6 +29,7 @@
   <script src="assets/js/widgets/tailscale.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/logs.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/ollama-usage.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/codex-usage.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/promotions.js?v=__CACHEBUSTER__"></script>
 
   <!-- Theme toggle -->
@@ -76,6 +77,12 @@
         interval: 30000,
         apiUrl: API + '/api/ollama-usage',
         title: '☁️ Ollama Cloud',
+      }));
+      dashboard.register(new CodexUsageWidget('codex-usage', {
+        size: 'medium',
+        interval: 60000,
+        apiUrl: API + '/api/codex-usage',
+        title: '⚡ Codex Limits',
       }));
 
       // Row 4: todo

@@ -978,6 +978,28 @@ def ollama_usage():
     return data
 
 
+# --- Codex (ChatGPT plan) Usage ---
+CODEX_USAGE_FILE = os.environ.get("CODEX_USAGE_FILE", "/ollama-data/codex-usage.json")
+
+@app.get("/api/codex-usage")
+def codex_usage():
+    """Возвращает данные о лимитах Codex (тариф ChatGPT) из JSON-файла."""
+    try:
+        with open(CODEX_USAGE_FILE) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"error": "no_data", "plan": "unknown",
+                "allowed": False, "limit_reached": False,
+                "windows": {"primary": {"used_percent": 0, "window_seconds": 0,
+                                        "reset_at": None, "reset_in_seconds": 0},
+                            "secondary": {"used_percent": 0, "window_seconds": 0,
+                                          "reset_at": None, "reset_in_seconds": 0}},
+                "credits": {"has_credits": False, "unlimited": False, "balance": "0"},
+                "fetched_at": None}
+
+    return data
+
+
 # --- Alert Webhook Config ---
 @app.get("/api/alert-config")
 def get_alert_config():
