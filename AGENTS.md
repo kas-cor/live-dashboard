@@ -84,6 +84,8 @@ curl -X POST 'http://localhost:9090/api/alert' \
 | GET | `/api/weather` | Open-Meteo weather |
 | GET | `/api/crypto` | CoinGecko prices |
 | GET | `/api/logs` | Systemd journal |
+| GET | `/api/ollama-usage` | Ollama Cloud included usage (from `data/ollama-usage.json`, cron-fed) |
+| GET | `/api/codex-usage` | Codex (ChatGPT plan) allowance windows + credits (from `data/codex-usage.json`, cron-fed) |
 | GET | `/api/config/{id}` | Widget config |
 | GET | `/api/config` | All configs |
 | GET | `/api/alert-config` | Webhook config |
@@ -152,6 +154,22 @@ ALERT_WEBHOOK_AUTH_TOKEN=token
 ALERT_CHECK_INTERVAL=60
 ALERT_COOLDOWN_MINUTES=10
 ```
+
+## External Data Feeds (cron → JSON → widget)
+
+Two widgets are fed by host cron jobs writing JSON into `data/` (mounted
+into the container as `/ollama-data:ro`); the backend only serves those files.
+The token/cookie secrets stay on the host, never in the container or git.
+
+| Widget | JSON file | Cron (host) | Source |
+|--------|-----------|-------------|--------|
+| `ollama-usage.js` | `data/ollama-usage.json` | every 30 min, `backend/ollama-usage/scripts/ollama-usage-dashboard.sh` (profile `cron`) | `ollama.com/settings` (session cookie) |
+| `codex-usage.js` | `data/codex-usage.json` | every 5 min, `~/.hermes/profiles/pet-projects/scripts/codex-usage/codex-usage.py` | `chatgpt.com/backend-api/codex/usage` (ChatGPT OAuth from `~/.codex/auth.json`) |
+
+Codex notes: the endpoint 403s without CLI-like headers (see
+`backend/codex-usage/SKILL.md`); the token refresher rotates the refresh token
+and must persist it. After changing widget JS/CSS: rebuild image
+(`docker compose build && up -d dashboard`) — assets are baked in.
 
 ## Build
 ```bash
