@@ -1009,7 +1009,7 @@ def ollama_usage():
 # Read-only over the parsec ledger — nothing here talks to the proxy itself.
 PARSEC_SCRIPTS = os.environ.get("PARSEC_SCRIPTS", "/app/parsec-scripts")
 PARSEC_LEDGER = os.environ.get("PARSEC_LEDGER", "/parsec-data/ledger.jsonl")
-PARSEC_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(PARSEC_SCRIPTS, "ollama_prices.json"))
+PARSEC_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(PARSEC_SCRIPTS, "parsec_prices.json"))
 PARSEC_CACHE_TTL = float(os.environ.get("PARSEC_CACHE_TTL", "5"))
 PARSEC_TOTALS_KEYS = (
     "hours", "since", "requests", "measured_requests", "unmeasured_requests", "peak_requests",

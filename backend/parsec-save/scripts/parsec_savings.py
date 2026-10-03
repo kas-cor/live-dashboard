@@ -29,7 +29,7 @@ import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_LEDGER = os.environ.get("PARSEC_LEDGER", os.path.expanduser("~/.parsec/ledger.jsonl"))
-DEFAULT_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(HERE, "ollama_prices.json"))
+DEFAULT_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(HERE, "parsec_prices.json"))
 
 # (key, hours) -- hours == 0 means "everything in the ledger"
 WINDOWS = (("24h", 24), ("7d", 24 * 7), ("all", 0))
@@ -109,9 +109,17 @@ def load_prices(path=DEFAULT_PRICES):
 
 
 def price_for(prices, model, when):
-    """(price dict or None, 'peak'|'std'|'?') for one row."""
+    """(price dict or None, 'peak'|'std'|'?') for one row.
+
+    Ledger models can carry a variant suffix (e.g. ``gpt-oss:120b``); if the
+    exact name has no price, retry with the base name before the ``:``.
+    """
     standard = prices.get("standard", {}).get(model)
     peak = prices.get("peak", {}).get(model)
+    if standard is None and peak is None and ":" in model:
+        base = model.split(":", 1)[0]
+        standard = prices.get("standard", {}).get(base)
+        peak = prices.get("peak", {}).get(base)
     if standard is None and peak is None:
         return None, "?"
     is_peak = when is not None and when.weekday() < 5 and 12 <= when.hour < 18
