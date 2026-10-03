@@ -5,6 +5,22 @@ description: Live dashboard widget «Parsec save tokens» — dollarised savings
 
 # Parsec save tokens — dashboard widget
 
+## Свежесть пула (health)
+
+После переписывания моста parsec работает пулом (фронт `balancer.py` + 6 воркеров),
+и каждый воркер пишет свой ledger — `~/dockers/parsec-pool/state/port-<port>/ledger.jsonl`.
+Каталог смонтирован в контейнер как `/parsec-pool:ro` (см. `docker-compose.yml`).
+
+`/api/parsec-save` отдаёт блок `health`:
+
+- `stale` — есть молчащие воркеры (или портов вовсе нет);
+- `threshold_minutes` — порог тишины, env `PARSEC_STALE_MINUTES` (по умолчанию 45);
+- `ports_total` / `ports_stale` / `stale_ports` / `worst` / `ports[]` (`age_minutes`, `last_ts`).
+
+Виджет `assets/js/widgets/parsec-save.js` рисует это строкой над hero-блоком
+(`.parsec-health.is-ok` / `.is-warn`). Проверка: `node tests/parsec-health.test.js`
+(3 состояния: растёт / воркер замолчал / каталог не смонтирован).
+
 Live widget showing what the local **parsec proxy** saves: tokens not sent to
 Ollama Cloud, that in dollars, the dollars actually spent, plus requests /
 cache read / output, a per-model breakdown and a **24ч / 7д / всё** window switch.

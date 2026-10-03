@@ -32,6 +32,7 @@ class ParsecSaveWidget extends BaseWidget {
         </div>
       </div>
       <div class="widget-body parsec-body">
+        <div class="parsec-health" hidden></div>
         <div class="parsec-hero">
           <div class="parsec-hero-main">
             <span class="parsec-hero-value" data-f="tokens_saved">—</span>
@@ -78,6 +79,30 @@ class ParsecSaveWidget extends BaseWidget {
       btn.classList.toggle('is-active', btn.dataset.window === key);
     });
     this.paint();
+  }
+
+  // Свежесть per-port ledger'ов пула: молчащий воркер виден, даже если агрегат растёт.
+  _paintHealth() {
+    const box = this.element.querySelector('.parsec-health');
+    if (!box) return;
+    const h = this.data && this.data.health;
+    box.hidden = false;
+    if (!h || !h.available) {
+      box.className = 'parsec-health is-warn';
+      box.textContent = '⚠️ per-port ledger недоступен: ' + ((h && h.reason) || 'нет данных');
+      return;
+    }
+    const ages = (h.ports || []).map(p => p.age_minutes);
+    const fresh = ages.length ? Math.min(...ages) : null;
+    if (h.stale) {
+      const names = (h.stale_ports || []).join(', ');
+      box.className = 'parsec-health is-warn';
+      box.textContent = `⚠️ молчат дольше ${h.threshold_minutes} мин: ${names || 'все воркеры'} `
+        + `(${h.ports_stale}/${h.ports_total} портов)`;
+      return;
+    }
+    box.className = 'parsec-health is-ok';
+    box.textContent = `✅ ledger пула растёт: ${h.ports_total} воркеров, свежайшая запись ${Math.round(fresh)} мин назад`;
   }
 
   _set(field, text) {
@@ -137,6 +162,7 @@ class ParsecSaveWidget extends BaseWidget {
     if (!this.data || !this.data.windows) return;
     const win = this.data.windows[this.windowKey];
     if (!win) return;
+    this._paintHealth();
 
     this._set('tokens_saved', this._tokens(win.tokens_saved));
     this._set('usd_saved', this._usd(win.usd_saved));
