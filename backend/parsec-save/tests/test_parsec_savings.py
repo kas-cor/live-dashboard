@@ -125,6 +125,18 @@ class ParsecSavingsTest(unittest.TestCase):
         self.assertEqual(t["tokens_saved"], 500)  # tokens still counted
         self.assertEqual(t["usd_saved"], 0.0)
 
+    def test_variant_suffix_falls_back_to_base_price(self):
+        """gpt-oss:120b is priced via the base name gpt-oss (ledger variant suffix)."""
+        now = dt.datetime(2026, 1, 6, 9, 0, tzinfo=dt.timezone.utc)  # Tue 09:00 -> std
+        data = self.compute([row("2026-01-06T08:30:00Z", model="m1:120b")], now=now,
+                            windows=(("24h", 24),))
+        t = data["windows"]["24h"]
+        # priced via m1's standard table, not unpriced
+        self.assertNotIn("m1:120b", t["unpriced_models"])
+        self.assertGreater(t["usd_cost"], 0.0)
+        self.assertGreater(t["usd_saved"], 0.0)
+        self.assertTrue(t["models"][0]["priced"])
+
     def test_percentages_and_model_rows(self):
         now = dt.datetime(2026, 1, 6, 9, 0, tzinfo=dt.timezone.utc)
         data = self.compute([row("2026-01-06T08:30:00Z")], now=now,

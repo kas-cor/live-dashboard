@@ -829,17 +829,16 @@ def get_server_status():
     if SERVER_CACHE["data"] and (now - SERVER_CACHE["ts"]) < 15:
         return SERVER_CACHE["data"]
     results = {}
-    # Collect the servers concurrently: sequentially, N unreachable hosts cost
-    # N × ConnectTimeout and blow past nginx's 10s proxy_read_timeout (504).
+    # Check servers concurrently so one slow SSH target cannot delay every widget.
     servers = list(SERVERS_CONFIG.items())
-    collected = []
     if servers:
         with ThreadPoolExecutor(max_workers=min(len(servers), 8)) as pool:
             collected = list(pool.map(
-                lambda kv: ssh_collect(kv[1]["host"], kv[1]["port"], kv[1]["user"]),
+                lambda item: ssh_collect(item[1]["host"], item[1]["port"], item[1]["user"]),
                 servers))
+    else:
+        collected = []
     for (sid, cfg), data in zip(servers, collected):
-        # ssh_collect returns None when the host answers with unparsable output.
         if not isinstance(data, dict):
             data = {"online": False, "cpu": 0, "ram": 0, "disk": 0, "uptime": "OFFLINE",
                     "load1": 0, "load5": 0, "load15": 0, "cpu_model": "",
@@ -929,6 +928,7 @@ def save_sites_list(sites):
 
 def check_site(url):
     """Check site reachability; treat redirects as healthy and retry unsupported HEAD with GET."""
+    import urllib.error
     import urllib.request
 
     class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -1042,7 +1042,7 @@ def ollama_usage():
 # Read-only over the parsec ledger — nothing here talks to the proxy itself.
 PARSEC_SCRIPTS = os.environ.get("PARSEC_SCRIPTS", "/app/parsec-scripts")
 PARSEC_LEDGER = os.environ.get("PARSEC_LEDGER", "/parsec-data/ledger.jsonl")
-PARSEC_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(PARSEC_SCRIPTS, "ollama_prices.json"))
+PARSEC_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(PARSEC_SCRIPTS, "parsec_prices.json"))
 PARSEC_CACHE_TTL = float(os.environ.get("PARSEC_CACHE_TTL", "5"))
 PARSEC_TOTALS_KEYS = (
     "hours", "since", "requests", "measured_requests", "unmeasured_requests", "peak_requests",

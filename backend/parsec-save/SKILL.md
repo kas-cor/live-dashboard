@@ -5,6 +5,22 @@ description: Live dashboard widget «Parsec save tokens» — dollarised savings
 
 # Parsec save tokens — dashboard widget
 
+## Свежесть пула (health)
+
+После переписывания моста parsec работает пулом (фронт `balancer.py` + 6 воркеров),
+и каждый воркер пишет свой ledger — `~/dockers/parsec-pool/state/port-<port>/ledger.jsonl`.
+Каталог смонтирован в контейнер как `/parsec-pool:ro` (см. `docker-compose.yml`).
+
+`/api/parsec-save` отдаёт блок `health`:
+
+- `stale` — есть молчащие воркеры (или портов вовсе нет);
+- `threshold_minutes` — порог тишины, env `PARSEC_STALE_MINUTES` (по умолчанию 45);
+- `ports_total` / `ports_stale` / `stale_ports` / `worst` / `ports[]` (`age_minutes`, `last_ts`).
+
+Виджет `assets/js/widgets/parsec-save.js` рисует это строкой над hero-блоком
+(`.parsec-health.is-ok` / `.is-warn`). Проверка: `node tests/parsec-health.test.js`
+(3 состояния: растёт / воркер замолчал / каталог не смонтирован).
+
 Live widget showing what the local **parsec proxy** saves: tokens not sent to
 Ollama Cloud, that in dollars, the dollars actually spent, plus requests /
 cache read / output, a per-model breakdown and a **24ч / 7д / всё** window switch.
@@ -16,8 +32,11 @@ stay untouched).
 | Piece | Path | Role |
 |---|---|---|
 | Aggregator | `scripts/parsec_savings.py` | stdlib-only, one pass over `~/.parsec/ledger.jsonl`; computes 24h/7d/all at once (library + CLI) |
-| Prices | `scripts/ollama_prices.json` | snapshot of <https://ollama.com/pricing> (standard + peak tables) |
-| Price refresher | `scripts/fetch_ollama_prices.py` | re-parse the pricing page into that JSON |
+| Prices (live) | `scripts/parsec_prices.json` | merged Ollama + OpenAI table consumed by the widget |
+| Ollama snapshot | `scripts/ollama_prices.json` | snapshot of <https://ollama.com/pricing> (standard + peak tables) |
+| OpenAI cache | `scripts/openai_cache.json` | last fetched OpenAI block from models.dev (offline fallback) |
+| Price refresher | `scripts/fetch_ollama_prices.py` | re-parse the Ollama pricing page into `ollama_prices.json` |
+| Price merger | `scripts/fetch_prices.py` | Ollama + OpenAI (models.dev) + extras -> `parsec_prices.json` |
 | Tests | `tests/test_parsec_savings.py` | `python3 -m unittest discover -s backend/parsec-save/tests -t backend/parsec-save/tests` |
 | API | `backend.py` → `GET /api/parsec-save` | serves all three windows (5 s cache) |
 | UI | `assets/js/widgets/parsec-save.js` | plugin widget, 30 s auto-refresh, window switch is client-side |
@@ -70,11 +89,21 @@ The backend also honours `PARSEC_PRICES` and `PARSEC_CACHE_TTL` (default 5 s).
 
 ## Refreshing prices
 
-`python3 scripts/fetch_ollama_prices.py` (writes `ollama_prices.json` next to
-itself), then rebuild the image — the JSON is baked in. Rows the page lists as a
-range (`$0.60 - $3.60`) are skipped rather than guessed; models without a price
-are reported as `unpriced_models` and cost/savings for them stay out of the sums
-while their tokens are still counted.
+The widget reads the **merged** `parsec_prices.json`. Refresh in two steps:
+
+1. `python3 scripts/fetch_ollama_prices.py` — re-parse <https://ollama.com/pricing> into `ollama_prices.json`.
+2. `python3 scripts/fetch_prices.py` — fetch the OpenAI block from
+   <https://models.dev/catalog.json>, merge Ollama + OpenAI + extras into `parsec_prices.json`
+   (and cache the OpenAI block in `openai_cache.json` for offline reruns).
+
+Then rebuild the image — the JSON is baked in. Notes:
+- Ollama peak pricing is preserved as-is; OpenAI models have no peak table (standard only).
+- `fetch_prices.py` is offline-tolerant: on a failed fetch it reuses `openai_cache.json`.
+- `mimo-v2.5-free` is a genuinely free endpoint (price $0), kept in `EXTRA`.
+- Ledger model names with a variant suffix (e.g. `gpt-oss:120b`) fall back to the
+  base name (`gpt-oss`) for pricing.
+- Models still without a price are reported as `unpriced_models`; their cost and
+  savings stay out of the sums while their tokens are still counted.
 
 ## Relationship to the Telegram report
 

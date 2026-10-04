@@ -29,11 +29,66 @@ import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_LEDGER = os.environ.get("PARSEC_LEDGER", os.path.expanduser("~/.parsec/ledger.jsonl"))
-DEFAULT_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(HERE, "ollama_prices.json"))
+DEFAULT_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(HERE, "parsec_prices.json"))
 
 # (key, hours) -- hours == 0 means "everything in the ledger"
 WINDOWS = (("24h", 24), ("7d", 24 * 7), ("all", 0))
 TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
+
+# Пул parsec после переписывания моста пишет ledger на каждый воркер:
+# /parsec-pool/port-<port>/ledger.jsonl (хост: ~/dockers/parsec-pool/state).
+# Агрегат ~/.parsec/ledger.jsonl обновляет отдельный merge-джоб. Если воркер
+# замолчал, агрегат ещё растёт (другие-то пишут) — ловим именно по портам.
+POOL_STATE = os.environ.get("PARSEC_POOL_STATE", "/parsec-pool")
+STALE_MINUTES = float(os.environ.get("PARSEC_STALE_MINUTES", "45"))
+
+
+def _tail_ts(path):
+    """ts последней записи ledger'а: читаем хвост файла, а не весь файл."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            fh.seek(max(0, size - 4096))
+            chunk = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    for line in reversed([ln for ln in chunk.splitlines() if ln.strip()]):
+        try:
+            return parse_ts(json.loads(line)["ts"])
+        except (ValueError, KeyError, TypeError):
+            continue
+    return None
+
+
+def pool_health(now=None, threshold_minutes=STALE_MINUTES, state_dir=POOL_STATE):
+    """Кто из воркеров пула молчит — по возрасту каждого port-*/ledger.jsonl."""
+    now = now or utcnow()
+    if not os.path.isdir(state_dir):
+        return {"available": False, "reason": f"{state_dir} не смонтирован",
+                "stale": False, "threshold_minutes": threshold_minutes, "ports": []}
+    ports = []
+    for name in sorted(os.listdir(state_dir)):
+        if not name.startswith("port-"):
+            continue
+        path = os.path.join(state_dir, name, "ledger.jsonl")
+        if not os.path.exists(path):
+            continue
+        stamp = _tail_ts(path) or dt.datetime.fromtimestamp(
+            os.path.getmtime(path), dt.timezone.utc)
+        age = round((now - stamp).total_seconds() / 60.0, 1)
+        ports.append({"port": name.split("-", 1)[1], "last_ts": iso(stamp),
+                      "age_minutes": age, "stale": age > threshold_minutes})
+    stale_ports = [p["port"] for p in ports if p["stale"]]
+    return {
+        "available": True,
+        "threshold_minutes": threshold_minutes,
+        "ports_total": len(ports),
+        "ports_stale": len(stale_ports),
+        "stale": bool(stale_ports) or not ports,
+        "stale_ports": stale_ports,
+        "worst": max(ports, key=lambda p: p["age_minutes"]) if ports else None,
+        "ports": ports,
+    }
 
 
 def utcnow():
@@ -54,9 +109,17 @@ def load_prices(path=DEFAULT_PRICES):
 
 
 def price_for(prices, model, when):
-    """(price dict or None, 'peak'|'std'|'?') for one row."""
+    """(price dict or None, 'peak'|'std'|'?') for one row.
+
+    Ledger models can carry a variant suffix (e.g. ``gpt-oss:120b``); if the
+    exact name has no price, retry with the base name before the ``:``.
+    """
     standard = prices.get("standard", {}).get(model)
     peak = prices.get("peak", {}).get(model)
+    if standard is None and peak is None and ":" in model:
+        base = model.split(":", 1)[0]
+        standard = prices.get("standard", {}).get(base)
+        peak = prices.get("peak", {}).get(base)
     if standard is None and peak is None:
         return None, "?"
     is_peak = when is not None and when.weekday() < 5 and 12 <= when.hour < 18
@@ -191,6 +254,7 @@ def compute(ledger_path=DEFAULT_LEDGER, prices_path=DEFAULT_PRICES, windows=WIND
         "ledger": {"path": ledger_path, "rows": rows_total, "unparsable": rows_bad,
                    "unmeasured_total": rows_unmeasured_total,
                    "first_ts": first_ts, "last_ts": last_ts},
+        "health": pool_health(now),
         "prices": {"source": prices.get("source"), "unit": prices.get("unit"),
                    "peak_window_utc": prices.get("peak_window_utc")},
         "windows": out,
