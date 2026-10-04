@@ -1015,13 +1015,6 @@ body::before {
   border: 1px solid rgba(255, 85, 0, 0.4);
 }
 
-.codex-reset-caption {
-  margin: 0 0 8px;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .codex-windows {
   display: flex;
   flex-direction: column;
@@ -1052,22 +1045,6 @@ body::before {
   font-weight: 600;
   color: var(--accent);
   font-family: 'JetBrains Mono', monospace;
-}
-
-.codex-reset-action {
-  display: inline-flex;
-  margin: 0 0 8px;
-  padding: 5px 9px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-primary);
-  font-size: 11px;
-  text-decoration: none;
-}
-
-.codex-reset-action:hover {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 
 .codex-credits {
