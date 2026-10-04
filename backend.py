@@ -928,17 +928,32 @@ def save_sites_list(sites):
     db.close()
 
 def check_site(url):
-    """Check if a URL returns HTTP 200."""
+    """Check site reachability; treat redirects as healthy and retry unsupported HEAD with GET."""
     import urllib.request
-    try:
-        req = urllib.request.Request(url, method="HEAD")
-        resp = urllib.request.urlopen(req, timeout=10)
-        code = resp.status
-        return {"url": url, "status": code, "online": code == 200}
-    except urllib.error.HTTPError as e:
-        return {"url": url, "status": e.code, "online": False}
-    except Exception as e:
-        return {"url": url, "status": 0, "online": False}
+
+    class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirectHandler)
+
+    def status_for(method):
+        req = urllib.request.Request(
+            url, method=method,
+            headers={"User-Agent": "DashboardHealthCheck/1.0"},
+        )
+        try:
+            with opener.open(req, timeout=4) as resp:
+                return resp.status
+        except urllib.error.HTTPError as e:
+            return e.code
+        except Exception:
+            return 0
+
+    code = status_for("HEAD")
+    if code in (0, 405, 501):
+        code = status_for("GET")
+    return {"url": url, "status": code, "online": 200 <= code < 400}
 
 @app.get("/api/site-status")
 def get_site_status():
@@ -950,7 +965,8 @@ def get_site_status():
         urls = get_sites_list()
         if not urls:
             return {"sites": [], "alerts": []}
-        results = [check_site(url) for url in urls]
+        with ThreadPoolExecutor(max_workers=min(len(urls), 8)) as pool:
+            results = list(pool.map(check_site, urls))
         # Red (offline) first
         results.sort(key=lambda x: x["online"], reverse=False)
         SITE_CACHE["data"] = results

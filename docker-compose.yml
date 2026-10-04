@@ -19,6 +19,7 @@ services:
       - ${HOME}/.ssh:/root/.ssh:ro
       - /projects/dashboard/data:/ollama-data:ro
       - ${HOME}/.parsec:/parsec-data:ro
+      - ${HOME}/dockers/parsec-pool/state:/parsec-pool:ro
       - ${HOME}/.hermes/data:/hermes-data:ro
       - dashboard-data:/data
     environment:
