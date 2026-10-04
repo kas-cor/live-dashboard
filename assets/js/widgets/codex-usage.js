@@ -20,9 +20,11 @@ class CodexUsageWidget extends BaseWidget {
           <div class="codex-plan-line">Loading...</div>
           <div class="codex-reset-caption">Сброс лимита использования</div>
           <div class="codex-windows">
-            ${this._windowBlock('primary', 'Window 5h')}
-            ${this._windowBlock('secondary', 'Weekly')}
+            ${this._windowBlock('primary', 'Лимит на 5 ч')}
+            ${this._windowBlock('secondary', 'Недельный лимит')}
           </div>
+          <a class="codex-reset-action" href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer"
+             title="В ChatGPT откройте Settings → Usage. Сброс может быть платным и доступен не всем.">Открыть настройки использования</a>
           <div class="codex-credits"></div>
         </div>
       </div>
@@ -34,12 +36,12 @@ class CodexUsageWidget extends BaseWidget {
       <div class="codex-window-block">
         <div class="codex-window-header">
           <span class="codex-window-title codex-window-title-${which}">${fallbackTitle}</span>
-          <span class="codex-window-reset usage-reset-${which}">--</span>
         </div>
         <div class="metric">
           <div class="progress-bar"><div class="progress-fill codex-fill-${which}" style="width:0%"></div></div>
           <span class="metric-value codex-value-${which}">--%</span>
         </div>
+        <div class="codex-window-reset usage-reset-${which}">Время сброса не указано</div>
       </div>
     `;
   }
@@ -49,8 +51,8 @@ class CodexUsageWidget extends BaseWidget {
     const sec = w.window_seconds || 0;
     if (sec <= 0) return null;
     const hours = Math.round(sec / 3600);
-    if (hours < 48) return `${hours}h window`;
-    return 'Weekly';
+    if (hours < 48) return `Лимит на ${hours} ч`;
+    return 'Недельный лимит';
   }
 
   async update() {
@@ -74,21 +76,20 @@ class CodexUsageWidget extends BaseWidget {
     if (planEl) planEl.innerHTML = `<span class="status-indicator status-online"></span> ${plan} · Codex${reached}`;
 
     const fmtRel = (secs) => {
-      if (!secs || secs <= 0) return 'now';
+      if (secs <= 0) return 'сейчас';
       const days = Math.floor(secs / 86400);
       const hours = Math.floor((secs % 86400) / 3600);
       const mins = Math.floor((secs % 3600) / 60);
-      if (days > 0) return `${days}d ${hours}h`;
-      if (hours > 0) return `${hours}h ${mins}m`;
-      return `${mins}m`;
+      if (days > 0) return `${days} д ${hours} ч`;
+      if (hours > 0) return `${hours} ч ${mins} мин`;
+      return mins > 0 ? `${mins} мин` : 'менее 1 мин';
     };
 
     const fmtAbs = (epoch) => {
       if (!epoch) return null;
       const dt = new Date(epoch * 1000);
       if (isNaN(dt)) return null;
-      const p = (n) => String(n).padStart(2, '0');
-      return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()} ${p(dt.getHours())}:${p(dt.getMinutes())}`;
+      return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(dt);
     };
 
     for (const which of ['primary', 'secondary']) {
@@ -114,8 +115,17 @@ class CodexUsageWidget extends BaseWidget {
 
       const resetEl = body.querySelector(`.usage-reset-${which}`);
       if (resetEl) {
-        const abs = fmtAbs(w.reset_at);
-        resetEl.textContent = abs ? `${abs} (${fmtRel(w.reset_in_seconds)})` : fmtRel(w.reset_in_seconds);
+        const resetAt = Number.isFinite(w.reset_at) && w.reset_at > 0 ? w.reset_at : null;
+        const resetIn = Number.isFinite(w.reset_in_seconds) && w.reset_in_seconds > 0
+          ? w.reset_in_seconds
+          : null;
+        const remaining = resetAt !== null
+          ? Math.max(0, resetAt - Date.now() / 1000)
+          : resetIn;
+        const abs = fmtAbs(resetAt);
+        resetEl.textContent = remaining === null
+          ? 'Время сброса не указано'
+          : `Сброс через ${fmtRel(remaining)}${abs ? ` · ${abs}` : ''}`;
       }
     }
 
