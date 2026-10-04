@@ -991,6 +991,103 @@ body::before {
   text-align: center;
 }
 
+/* ── Codex (ChatGPT plan) Usage Widget ─────── */
+.codex-card {
+  padding: 8px 0;
+}
+
+.codex-plan-line {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.codex-limit-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 85, 0, 0.15);
+  color: #ff5500;
+  border: 1px solid rgba(255, 85, 0, 0.4);
+}
+
+.codex-reset-caption {
+  margin: 0 0 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.codex-windows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.codex-window-block {
+  margin-bottom: 6px;
+}
+
+.codex-window-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+
+.codex-window-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.codex-window-block .codex-window-reset {
+  margin: 5px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.codex-reset-action {
+  display: inline-flex;
+  margin: 0 0 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.codex-reset-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.codex-credits {
+  display: none;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.codex-credits.unlimited {
+  display: block;
+  color: var(--success, #00ff88);
+}
+
+.codex-credits:not(.unlimited):not(:empty) {
+  display: block;
+}
+
 /* ── Promotions Widget ─────────────────────── */
 .promo-list {
   display: flex;
