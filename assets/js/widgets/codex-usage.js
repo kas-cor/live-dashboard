@@ -23,7 +23,7 @@ class CodexUsageWidget extends BaseWidget {
             ${this._windowBlock('primary', 'Лимит на 5 ч')}
             ${this._windowBlock('secondary', 'Недельный лимит')}
           </div>
-          <a class="codex-reset-action" href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer"
+          <a class="codex-reset-action" href="https://chatgpt.com/codex/cloud/settings/usage" target="_blank" rel="noopener noreferrer"
              title="В ChatGPT откройте Settings → Usage. Сброс может быть платным и доступен не всем.">Открыть настройки использования</a>
           <div class="codex-credits"></div>
         </div>
