@@ -17,9 +17,9 @@ async function main() {
   const widget = new Widget('codex-usage', { apiUrl: '/api/codex-usage' });
   widget.render();
   const markup = widget.element.innerHTML;
-  assert.ok(markup.includes('Сброс лимита использования'));
-  assert.ok(markup.includes('Открыть настройки использования'));
-  assert.ok(markup.includes('href="https://chatgpt.com/codex/cloud/settings/usage"'));
+  assert.ok(!markup.includes('Сброс лимита использования'));
+  assert.ok(!markup.includes('Открыть настройки использования'));
+  assert.ok(markup.includes('usage-reset-primary'));
 
   const selectors = [
     '.codex-plan-line', '.codex-window-title-primary', '.codex-fill-primary',

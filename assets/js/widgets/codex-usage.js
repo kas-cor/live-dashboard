@@ -18,13 +18,10 @@ class CodexUsageWidget extends BaseWidget {
       <div class="widget-body" id="codex-${this.id}">
         <div class="codex-card">
           <div class="codex-plan-line">Loading...</div>
-          <div class="codex-reset-caption">Сброс лимита использования</div>
           <div class="codex-windows">
             ${this._windowBlock('primary', 'Лимит на 5 ч')}
             ${this._windowBlock('secondary', 'Недельный лимит')}
           </div>
-          <a class="codex-reset-action" href="https://chatgpt.com/codex/cloud/settings/usage" target="_blank" rel="noopener noreferrer"
-             title="В ChatGPT откройте Settings → Usage. Сброс может быть платным и доступен не всем.">Открыть настройки использования</a>
           <div class="codex-credits"></div>
         </div>
       </div>
