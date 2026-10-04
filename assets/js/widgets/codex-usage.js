@@ -18,6 +18,7 @@ class CodexUsageWidget extends BaseWidget {
       <div class="widget-body" id="codex-${this.id}">
         <div class="codex-card">
           <div class="codex-plan-line">Loading...</div>
+          <div class="codex-reset-caption">Сброс лимита использования</div>
           <div class="codex-windows">
             ${this._windowBlock('primary', 'Window 5h')}
             ${this._windowBlock('secondary', 'Weekly')}
@@ -33,7 +34,7 @@ class CodexUsageWidget extends BaseWidget {
       <div class="codex-window-block">
         <div class="codex-window-header">
           <span class="codex-window-title codex-window-title-${which}">${fallbackTitle}</span>
-          <span class="codex-window-reset usage-reset-${which}">resets: --</span>
+          <span class="codex-window-reset usage-reset-${which}">--</span>
         </div>
         <div class="metric">
           <div class="progress-bar"><div class="progress-fill codex-fill-${which}" style="width:0%"></div></div>
@@ -114,7 +115,7 @@ class CodexUsageWidget extends BaseWidget {
       const resetEl = body.querySelector(`.usage-reset-${which}`);
       if (resetEl) {
         const abs = fmtAbs(w.reset_at);
-        resetEl.textContent = abs ? `resets: ${abs} (${fmtRel(w.reset_in_seconds)})` : `resets: ${fmtRel(w.reset_in_seconds)}`;
+        resetEl.textContent = abs ? `${abs} (${fmtRel(w.reset_in_seconds)})` : fmtRel(w.reset_in_seconds);
       }
     }
 

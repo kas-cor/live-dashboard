@@ -1003,6 +1003,12 @@ body::before {
   border: 1px solid rgba(255, 85, 0, 0.4);
 }
 
+.codex-reset-caption {
+  margin: -6px 0 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
 .codex-windows {
   display: flex;
   flex-direction: column;
