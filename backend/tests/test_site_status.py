@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 
 from backend import check_site
