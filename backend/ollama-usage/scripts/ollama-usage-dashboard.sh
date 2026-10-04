@@ -27,8 +27,8 @@ case "$OUTPUT" in
 Как обновить:
 1. Открой https://ollama.com в браузере (уже должен быть залогинен)
 2. DevTools (F12) → Application → Cookies → ollama.com
-3. Скопируй значение __Secure-session
-4. Отправь мне команду: /update-ollama-cookie <значение>
+3. Скопируй значение __Secure-session (это уже зашифрованный blob, начинается с YWdlLWVuY3J5cHRpb24)
+4. Отправь мне команду: /update-ollama-cookie <значение целиком, как есть>
 
 Или просто напиши мне "обнови куку олламы" и я помогу.
 EOF

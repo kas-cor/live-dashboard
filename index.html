@@ -30,6 +30,7 @@
   <script src="assets/js/widgets/logs.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/ollama-usage.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/promotions.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/parsec-save.js?v=__CACHEBUSTER__"></script>
 
   <!-- Theme toggle -->
   <script src="assets/js/widgets/theme-toggle.js"></script>
@@ -78,7 +79,13 @@
         title: '☁️ Ollama Cloud',
       }));
 
-      // Row 4: todo
+      // Row 4: todo + parsec save tokens
+      dashboard.register(new ParsecSaveWidget('parsec-save', {
+        size: 'medium',
+        interval: 30000,
+        apiUrl: API + '/api/parsec-save',
+        title: '💸 Parsec save',
+      }));
       dashboard.register(new TodoWidget('todo', { size: 'medium', interval: 30000, apiUrl: API + '/api/todo' }));
 
       // Row 5: docker + tailscale

@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir fastapi uvicorn python-dotenv httpx
 
 # Backend
 COPY backend.py .
+COPY backend/parsec-save/scripts/ /app/parsec-scripts/
 
 # Frontend
 COPY assets/ /usr/share/nginx/html/assets/
