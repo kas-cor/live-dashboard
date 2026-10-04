@@ -946,7 +946,9 @@ def check_site(url):
             with opener.open(req, timeout=4) as resp:
                 return resp.status
         except urllib.error.HTTPError as e:
-            return e.code
+            code = e.code
+            e.close()
+            return code
         except Exception:
             return 0
 
