@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
 from backend import check_site
@@ -16,7 +16,7 @@ class SiteStatusTests(unittest.TestCase):
         build_opener.return_value.open.assert_called_once()
 
     def test_get_fallback_when_head_is_unsupported(self):
-        response = Mock()
+        response = MagicMock()
         response.__enter__.return_value.status = 200
         with patch("urllib.request.build_opener") as build_opener:
             opener = build_opener.return_value
