@@ -35,11 +35,12 @@ class SitesWidget extends BaseWidget {
       const domain = new URL(site).hostname;
       return '<div class="site-row" data-url="' + site + '"><span class="status-indicator status-unknown"></span><span class="site-domain">' + domain + '</span><span class="site-code"></span></div>';
     }
-    const statusClass = site.online ? 'status-online' : 'status-offline';
+    const unknown = site.status === 0 || site.online == null;
+    const statusClass = unknown ? 'status-unknown' : (site.online ? 'status-online' : 'status-offline');
     const domain = new URL(site.url).hostname;
-    const codeText = showStatusCode && !site.online ? ' ' + site.status : '';
-    const codeClass = site.online ? '' : 'site-error';
-    const rowClass = !site.online && highlightOffline ? ' site-row-error' : '';
+    const codeText = showStatusCode && unknown ? ' ?' : (showStatusCode && !site.online ? ' ' + site.status : '');
+    const codeClass = !unknown && !site.online ? 'site-error' : '';
+    const rowClass = !unknown && !site.online && highlightOffline ? ' site-row-error' : '';
     return '<div class="site-row' + rowClass + '" data-url="' + site.url + '"><span class="status-indicator ' + statusClass + '"></span><span class="site-domain ' + codeClass + '">' + domain + '</span><span class="site-code ' + codeClass + '">' + codeText + '</span></div>';
   }
 
