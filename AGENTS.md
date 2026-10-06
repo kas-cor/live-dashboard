@@ -146,6 +146,7 @@ window.MyWidget = MyWidget;
 ```
 BACKEND_PORT=9090
 BACKEND_HOST=127.0.0.1
+SSH_BIND_ADDRESS=185.130.107.79
 BACKEND_HOSTNAME=hostname
 SERVERS_CONFIG={"id":{"name":"Name","host":"ip","port":22,"user":"root"}}
 SITES_SEED=https://site1.com,https://site2.com

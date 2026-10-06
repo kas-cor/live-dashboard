@@ -725,10 +725,13 @@ SERVER_CACHE = {"data": None, "ts": 0}
 def ssh_collect(host, port=22, user="root"):
     """Collect server metrics via SSH. Returns dict or None on failure."""
     try:
+        bind_address = os.environ.get("SSH_BIND_ADDRESS", "").strip()
         cmd = [
             "ssh", "-o", "StrictHostKeyChecking=no",
             "-o", "ConnectTimeout=5",
             "-o", "BatchMode=yes",
+            "-b" if bind_address else None,
+            bind_address or None,
             f"-p{port}" if port != 22 else None,
             f"{user}@{host}",
             "cat /proc/loadavg 2>/dev/null; echo '---'; "
@@ -955,7 +958,7 @@ def check_site(url):
     code = status_for("HEAD")
     if code in (0, 405, 501):
         code = status_for("GET")
-    return {"url": url, "status": code, "online": 200 <= code < 400}
+    return {"url": url, "status": code, "online": None if code == 0 else 200 <= code < 400}
 
 @app.get("/api/site-status")
 def get_site_status():
@@ -969,15 +972,16 @@ def get_site_status():
             return {"sites": [], "alerts": []}
         with ThreadPoolExecutor(max_workers=min(len(urls), 8)) as pool:
             results = list(pool.map(check_site, urls))
-        # Red (offline) first
-        results.sort(key=lambda x: x["online"], reverse=False)
+        # Confirmed offline first; transport failures are unknown and sort last.
+        results.sort(key=lambda x: (x["status"] == 0, x["online"] is True))
         SITE_CACHE["data"] = results
         SITE_CACHE["ts"] = now
 
     # Sites: check offline
     config = get_widget_config_dict("sites")
     site_alerts = []
-    offline = [s for s in results if not s["online"]]
+    # A transport failure is unknown, not proof that the site is offline.
+    offline = [s for s in results if s["status"] != 0 and not s["online"]]
     if config.get("alertOfflineEnabled", True) and offline:
         names = ", ".join(s["url"] for s in offline)
         statuses = ", ".join(f"{s['url']} ({s['status']})" for s in offline)
