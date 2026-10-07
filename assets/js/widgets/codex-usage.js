@@ -39,6 +39,7 @@ class CodexUsageWidget extends BaseWidget {
           <span class="metric-value codex-value-${which}">--%</span>
         </div>
         <div class="codex-window-reset usage-reset-${which}">Время сброса не указано</div>
+        <div class="codex-window-forecast usage-forecast-${which}">Собираю данные о темпе расхода</div>
       </div>
     `;
   }
@@ -50,6 +51,69 @@ class CodexUsageWidget extends BaseWidget {
     const hours = Math.round(sec / 3600);
     if (hours < 48) return `Лимит на ${hours} ч`;
     return 'Недельный лимит';
+  }
+
+  _usageHistory(which, window, fetchedAtMs, nowMs) {
+    if (!Number.isFinite(window.used_percent)) return [];
+    const key = `codex-usage-history-v1-${which}`;
+    const resetAt = Number.isFinite(window.reset_at) ? window.reset_at : null;
+    let samples = [];
+    try {
+      samples = JSON.parse(localStorage.getItem(key) || '[]');
+      if (!Array.isArray(samples)) samples = [];
+    } catch (e) {
+      samples = [];
+    }
+    samples = samples.filter((s) => Number.isFinite(s.at)
+      && s.at <= nowMs + 5 * 60_000 && Number.isFinite(s.used) && s.used >= 0 && s.used <= 100);
+    const newestAt = samples.reduce((newest, sample) => Math.max(newest, sample.at), -Infinity);
+    if (fetchedAtMs < newestAt) return null;
+    samples = samples.filter((s) => s.at <= fetchedAtMs);
+    if (samples.length && (samples[samples.length - 1].resetAt !== resetAt
+      || window.used_percent < samples[samples.length - 1].used)) {
+      samples = []; // A reset-time change or usage drop starts a new cycle baseline.
+    }
+    const sameTimestamp = samples.find((s) => s.at === fetchedAtMs);
+    if (sameTimestamp && sameTimestamp.used !== window.used_percent) return null;
+    if (!sameTimestamp) {
+      samples.push({ at: fetchedAtMs, used: window.used_percent, resetAt });
+    }
+    samples.sort((a, b) => a.at - b.at);
+    samples = samples.slice(-72); // 6h at the 5-minute feed interval
+    try { localStorage.setItem(key, JSON.stringify(samples)); } catch (e) { /* storage may be disabled */ }
+    return samples;
+  }
+
+  _usageForecast(which, window, fetchedAtMs, nowMs, fmtRel) {
+    if (!Number.isFinite(fetchedAtMs)) return 'Нет времени снимка для оценки темпа';
+    if (fetchedAtMs > nowMs + 5 * 60_000) return 'Время снимка из будущего';
+    if (nowMs - fetchedAtMs > 15 * 60_000) return 'Данные для оценки темпа устарели';
+    const used = Number(window.used_percent);
+    if (!Number.isFinite(used) || used < 0 || used > 100) return 'Некорректный процент использования';
+    if (used >= 100) return 'Лимит уже исчерпан';
+    const history = this._usageHistory(which, window, fetchedAtMs, nowMs);
+    if (history === null) return 'Получен более старый снимок расхода';
+    const samples = history.filter((s) => fetchedAtMs - s.at <= 6 * 3600_000);
+    if (samples.length < 2) return 'Недостаточно истории о расходе';
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const elapsedHours = (last.at - first.at) / 3600_000;
+    const usedChange = last.used - first.used;
+    if (elapsedHours < 0.25 || usedChange <= 0) return 'Недостаточно данных о темпе расхода';
+
+    const ratePerHour = usedChange / elapsedHours;
+    const projectedUsed = Math.min(100, used + ratePerHour * Math.max(0, nowMs - fetchedAtMs) / 3600_000);
+    const exhaustSeconds = (100 - projectedUsed) / ratePerHour * 3600;
+    const resetSeconds = Number.isFinite(window.reset_at)
+      ? Math.max(0, window.reset_at - nowMs / 1000)
+      : null;
+    const result = resetSeconds === null ? 'Лимита хватит примерно на'
+      : exhaustSeconds >= resetSeconds ? 'Хватит' : 'Не хватит';
+    const resetText = resetSeconds === null ? '' : `, сброс через ${fmtRel(resetSeconds)}`;
+    const endText = resetSeconds === null
+      ? ` ${fmtRel(exhaustSeconds)} при текущем темпе`
+      : `: лимит закончится примерно через ${fmtRel(exhaustSeconds)}${resetText}`;
+    return result + endText;
   }
 
   async update() {
@@ -89,6 +153,9 @@ class CodexUsageWidget extends BaseWidget {
       return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(dt);
     };
 
+    const parsedFetchedAt = Date.parse(d.fetched_at);
+    const fetchedAtMs = Number.isFinite(parsedFetchedAt) ? parsedFetchedAt : null;
+
     for (const which of ['primary', 'secondary']) {
       const w = (d.windows || {})[which] || {};
       const pct = w.used_percent || 0;
@@ -123,6 +190,15 @@ class CodexUsageWidget extends BaseWidget {
         resetEl.textContent = remaining === null
           ? 'Время сброса не указано'
           : `Сброс через ${fmtRel(remaining)}${abs ? ` · ${abs}` : ''}`;
+      }
+
+      const forecastEl = body.querySelector(`.usage-forecast-${which}`);
+      if (forecastEl) {
+        const forecast = this._usageForecast(which, w, fetchedAtMs, Date.now(), fmtRel);
+        forecastEl.textContent = forecast;
+        forecastEl.classList.remove('is-ok', 'is-warn');
+        if (forecast.startsWith('Хватит')) forecastEl.classList.add('is-ok');
+        if (forecast.startsWith('Не хватит')) forecastEl.classList.add('is-warn');
       }
     }
 
