@@ -22,13 +22,14 @@ async function main() {
   assert.ok(markup.includes('usage-reset-primary'));
   assert.ok(markup.includes('usage-forecast-primary'));
   assert.ok(markup.includes('usage-forecast-secondary'));
+  assert.ok(markup.includes('codex-reset-credits'));
 
   const selectors = [
     '.codex-plan-line', '.codex-window-title-primary', '.codex-fill-primary',
     '.codex-value-primary', '.usage-reset-primary', '.codex-window-title-secondary',
     '.codex-fill-secondary', '.codex-value-secondary', '.usage-reset-secondary',
     '.usage-forecast-primary', '.usage-forecast-secondary',
-    '.codex-credits',
+    '.codex-credits', '.codex-reset-credits',
   ];
   const nodes = new Map(selectors.map((selector) => {
     const classes = new Set();
@@ -63,6 +64,9 @@ async function main() {
   });
   Date.now = () => fixedNowMs;
   let snapshot = {
+    reset_credits: { available_count: 1, applicable_available_count: 0,
+      credits: [{ id: 'credit-1', type: 'weekly', status: 'available', issued_at: '2026-10-01',
+        expires_at: '2026-10-08', description: 'Bonus reset' }] },
     plan: 'plus',
     fetched_at: new Date(fixedNowMs).toISOString(),
     limit_reached: false,
@@ -83,6 +87,9 @@ async function main() {
     await widget.update();
     assert.strictEqual(nodes.get('.usage-forecast-primary').textContent, 'Недостаточно истории о расходе');
     snapshot = {
+      reset_credits: { available_count: 1, applicable_available_count: 0,
+        credits: [{ id: 'credit-1', type: 'weekly', status: 'available', issued_at: '2026-10-01',
+          expires_at: '2026-10-08', description: 'Bonus reset' }] },
       plan: 'plus',
       fetched_at: new Date(fixedNowMs + 3_600_000).toISOString(),
       limit_reached: false,
@@ -151,6 +158,10 @@ async function main() {
   assert.ok(nodes.get('.usage-forecast-primary').classList.contains('is-warn'));
   assert.ok(nodes.get('.usage-forecast-secondary').textContent.startsWith('Хватит: лимит закончится примерно через 3 д 7 ч'));
   assert.ok(nodes.get('.usage-forecast-secondary').classList.contains('is-ok'));
+  assert.strictEqual(
+    nodes.get('.codex-reset-credits').textContent,
+    'Сбросы: доступно 1 · применимо сейчас 0\ncredit-1 · weekly · available · выдан: 2026-10-01 · истекает: 2026-10-08 · Bonus reset',
+  );
   assert.strictEqual(
     widget._usageForecast('primary', { used_percent: 90, reset_at: fixedNowSec + 7_200 }, null, fixedNowMs, () => 'time'),
     'Нет времени снимка для оценки темпа',

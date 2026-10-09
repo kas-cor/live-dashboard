@@ -23,6 +23,7 @@ class CodexUsageWidget extends BaseWidget {
             ${this._windowBlock('secondary', 'Недельный лимит')}
           </div>
           <div class="codex-credits"></div>
+          <div class="codex-reset-credits"></div>
         </div>
       </div>
     `;
@@ -216,6 +217,33 @@ class CodexUsageWidget extends BaseWidget {
         creditsEl.textContent = '';
         creditsEl.classList.remove('unlimited');
       }
+    }
+
+    const resetCreditsEl = body.querySelector('.codex-reset-credits');
+    if (resetCreditsEl) {
+      const resets = d.reset_credits || {};
+      const available = Number.isFinite(resets.available_count) ? resets.available_count : null;
+      const applicable = Number.isFinite(resets.applicable_available_count)
+        ? resets.applicable_available_count : null;
+      const lines = [];
+      if (available !== null || applicable !== null) {
+        lines.push(`Сбросы: доступно ${available ?? '—'} · применимо сейчас ${applicable ?? '—'}`);
+      }
+      for (const credit of Array.isArray(resets.credits) ? resets.credits : []) {
+        if (!credit || typeof credit !== 'object') continue;
+        const parts = [
+          credit.id,
+          credit.type,
+          credit.status,
+          credit.issued_at && `выдан: ${credit.issued_at}`,
+          credit.expires_at && `истекает: ${credit.expires_at}`,
+          credit.description,
+        ].filter((value) => typeof value === 'string' && value.trim());
+        if (parts.length) lines.push(parts.join(' · '));
+      }
+      resetCreditsEl.textContent = lines.join('\n');
+      if (lines.length) resetCreditsEl.classList.add('is-visible');
+      else resetCreditsEl.classList.remove('is-visible');
     }
 
     this.element.querySelector('.last-update').textContent = new Date().toLocaleTimeString();

@@ -1075,6 +1075,19 @@ body::before {
   display: block;
 }
 
+.codex-reset-credits {
+  display: none;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.codex-reset-credits.is-visible { display: block; }
+
 /* ── Promotions Widget ─────────────────────── */
 .promo-list {
   display: flex;
