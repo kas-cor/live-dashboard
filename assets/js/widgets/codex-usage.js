@@ -19,8 +19,8 @@ class CodexUsageWidget extends BaseWidget {
         <div class="codex-card">
           <div class="codex-plan-line">Loading...</div>
           <div class="codex-windows">
-            ${this._windowBlock('primary', 'Лимит на 5 ч')}
-            ${this._windowBlock('secondary', 'Недельный лимит')}
+            ${this._windowBlock('primary', '5-hour limit')}
+            ${this._windowBlock('secondary', 'Weekly limit')}
           </div>
           <div class="codex-credits"></div>
           <div class="codex-reset-credits"></div>
@@ -34,13 +34,13 @@ class CodexUsageWidget extends BaseWidget {
       <div class="codex-window-block">
         <div class="codex-window-header">
           <span class="codex-window-title codex-window-title-${which}">${fallbackTitle}</span>
+          <span class="codex-window-reset usage-reset-${which}">Reset: --</span>
         </div>
         <div class="metric">
           <div class="progress-bar"><div class="progress-fill codex-fill-${which}" style="width:0%"></div></div>
           <span class="metric-value codex-value-${which}">--%</span>
         </div>
-        <div class="codex-window-reset usage-reset-${which}">Время сброса не указано</div>
-        <div class="codex-window-forecast usage-forecast-${which}">Собираю данные о темпе расхода</div>
+        <div class="codex-window-forecast usage-forecast-${which}">Collecting usage history</div>
       </div>
     `;
   }
@@ -50,8 +50,8 @@ class CodexUsageWidget extends BaseWidget {
     const sec = w.window_seconds || 0;
     if (sec <= 0) return null;
     const hours = Math.round(sec / 3600);
-    if (hours < 48) return `Лимит на ${hours} ч`;
-    return 'Недельный лимит';
+    if (hours < 48) return `${hours}-hour limit`;
+    return 'Weekly limit';
   }
 
   _usageHistory(which, window, fetchedAtMs, nowMs) {
@@ -86,21 +86,21 @@ class CodexUsageWidget extends BaseWidget {
   }
 
   _usageForecast(which, window, fetchedAtMs, nowMs, fmtRel) {
-    if (!Number.isFinite(fetchedAtMs)) return 'Нет времени снимка для оценки темпа';
-    if (fetchedAtMs > nowMs + 5 * 60_000) return 'Время снимка из будущего';
-    if (nowMs - fetchedAtMs > 15 * 60_000) return 'Данные для оценки темпа устарели';
+    if (!Number.isFinite(fetchedAtMs)) return 'Snapshot time unavailable';
+    if (fetchedAtMs > nowMs + 5 * 60_000) return 'Snapshot timestamp is in the future';
+    if (nowMs - fetchedAtMs > 15 * 60_000) return 'Usage data is stale';
     const used = Number(window.used_percent);
-    if (!Number.isFinite(used) || used < 0 || used > 100) return 'Некорректный процент использования';
-    if (used >= 100) return 'Лимит уже исчерпан';
+    if (!Number.isFinite(used) || used < 0 || used > 100) return 'Invalid usage percentage';
+    if (used >= 100) return 'Limit exhausted';
     const history = this._usageHistory(which, window, fetchedAtMs, nowMs);
-    if (history === null) return 'Получен более старый снимок расхода';
+    if (history === null) return 'Received an older usage snapshot';
     const samples = history.filter((s) => fetchedAtMs - s.at <= 6 * 3600_000);
-    if (samples.length < 2) return 'Недостаточно истории о расходе';
+    if (samples.length < 2) return 'Not enough usage history';
     const first = samples[0];
     const last = samples[samples.length - 1];
     const elapsedHours = (last.at - first.at) / 3600_000;
     const usedChange = last.used - first.used;
-    if (elapsedHours < 0.25 || usedChange <= 0) return 'Недостаточно данных о темпе расхода';
+    if (elapsedHours < 0.25 || usedChange <= 0) return 'Not enough data to estimate usage rate';
 
     const ratePerHour = usedChange / elapsedHours;
     const projectedUsed = Math.min(100, used + ratePerHour * Math.max(0, nowMs - fetchedAtMs) / 3600_000);
@@ -108,12 +108,12 @@ class CodexUsageWidget extends BaseWidget {
     const resetSeconds = Number.isFinite(window.reset_at)
       ? Math.max(0, window.reset_at - nowMs / 1000)
       : null;
-    const result = resetSeconds === null ? 'Лимита хватит примерно на'
-      : exhaustSeconds >= resetSeconds ? 'Хватит' : 'Не хватит';
-    const resetText = resetSeconds === null ? '' : `, сброс через ${fmtRel(resetSeconds)}`;
+    const result = resetSeconds === null ? 'Expected to last about'
+      : exhaustSeconds >= resetSeconds ? 'Enough' : 'Not enough';
+    const resetText = resetSeconds === null ? '' : `, reset in ${fmtRel(resetSeconds)}`;
     const endText = resetSeconds === null
-      ? ` ${fmtRel(exhaustSeconds)} при текущем темпе`
-      : `: лимит закончится примерно через ${fmtRel(exhaustSeconds)}${resetText}`;
+      ? ` ${fmtRel(exhaustSeconds)} at the current rate`
+      : `: limit expected to run out in ${fmtRel(exhaustSeconds)}${resetText}`;
     return result + endText;
   }
 
@@ -138,20 +138,22 @@ class CodexUsageWidget extends BaseWidget {
     if (planEl) planEl.innerHTML = `<span class="status-indicator status-online"></span> ${plan} · Codex${reached}`;
 
     const fmtRel = (secs) => {
-      if (secs <= 0) return 'сейчас';
+      if (secs <= 0) return 'now';
       const days = Math.floor(secs / 86400);
       const hours = Math.floor((secs % 86400) / 3600);
       const mins = Math.floor((secs % 3600) / 60);
-      if (days > 0) return `${days} д ${hours} ч`;
-      if (hours > 0) return `${hours} ч ${mins} мин`;
-      return mins > 0 ? `${mins} мин` : 'менее 1 мин';
+      if (days > 0) return `${days}d ${hours}h`;
+      if (hours > 0) return `${hours}h ${mins}m`;
+      return mins > 0 ? `${mins}m` : '<1m';
     };
 
     const fmtAbs = (epoch) => {
       if (!epoch) return null;
       const dt = new Date(epoch * 1000);
       if (isNaN(dt)) return null;
-      return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(dt);
+      return new Intl.DateTimeFormat('en-US', {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      }).format(dt);
     };
 
     const parsedFetchedAt = Date.parse(d.fetched_at);
@@ -189,8 +191,8 @@ class CodexUsageWidget extends BaseWidget {
           : resetIn;
         const abs = fmtAbs(resetAt);
         resetEl.textContent = remaining === null
-          ? 'Время сброса не указано'
-          : `Сброс через ${fmtRel(remaining)}${abs ? ` · ${abs}` : ''}`;
+          ? 'Reset: --'
+          : `Reset: ${abs || `in ${fmtRel(remaining)}`}${abs ? ` · in ${fmtRel(remaining)}` : ''}`;
       }
 
       const forecastEl = body.querySelector(`.usage-forecast-${which}`);
@@ -198,8 +200,8 @@ class CodexUsageWidget extends BaseWidget {
         const forecast = this._usageForecast(which, w, fetchedAtMs, Date.now(), fmtRel);
         forecastEl.textContent = forecast;
         forecastEl.classList.remove('is-ok', 'is-warn');
-        if (forecast.startsWith('Хватит')) forecastEl.classList.add('is-ok');
-        if (forecast.startsWith('Не хватит')) forecastEl.classList.add('is-warn');
+        if (forecast.startsWith('Enough')) forecastEl.classList.add('is-ok');
+        if (forecast.startsWith('Not enough')) forecastEl.classList.add('is-warn');
       }
     }
 
@@ -227,7 +229,7 @@ class CodexUsageWidget extends BaseWidget {
         ? resets.applicable_available_count : null;
       const lines = [];
       if (available !== null || applicable !== null) {
-        lines.push(`Сбросы: доступно ${available ?? '—'} · применимо сейчас ${applicable ?? '—'}`);
+        lines.push(`Resets: ${available} available · ${applicable} applicable now`);
       }
       for (const credit of Array.isArray(resets.credits) ? resets.credits : []) {
         if (!credit || typeof credit !== 'object') continue;
@@ -235,8 +237,8 @@ class CodexUsageWidget extends BaseWidget {
           credit.id,
           credit.type,
           credit.status,
-          credit.issued_at && `выдан: ${credit.issued_at}`,
-          credit.expires_at && `истекает: ${credit.expires_at}`,
+          credit.issued_at && `issued: ${credit.issued_at}`,
+          credit.expires_at && `expires: ${credit.expires_at}`,
           credit.description,
         ].filter((value) => typeof value === 'string' && value.trim());
         if (parts.length) lines.push(parts.join(' · '));

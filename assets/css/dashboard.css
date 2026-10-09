@@ -1040,11 +1040,13 @@ body::before {
 }
 
 .codex-window-block .codex-window-reset {
-  margin: 5px 0 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
+  margin: 0;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-secondary);
   font-family: 'JetBrains Mono', monospace;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .codex-window-forecast {
