@@ -147,13 +147,23 @@ class CodexUsageWidget extends BaseWidget {
       return mins > 0 ? `${mins}m` : '<1m';
     };
 
+    const fmtDateTime = (date) => {
+      if (isNaN(date)) return null;
+      const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).formatToParts(date).map(({ type, value }) => [type, value]));
+      return `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute}`;
+    };
+
     const fmtAbs = (epoch) => {
       if (!epoch) return null;
-      const dt = new Date(epoch * 1000);
-      if (isNaN(dt)) return null;
-      return new Intl.DateTimeFormat('en-US', {
-        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-      }).format(dt);
+      return fmtDateTime(new Date(epoch * 1000));
+    };
+
+    const fmtCreditDate = (value) => {
+      const timestamp = Date.parse(value);
+      return Number.isFinite(timestamp) ? fmtDateTime(new Date(timestamp)) : null;
     };
 
     const parsedFetchedAt = Date.parse(d.fetched_at);
@@ -229,19 +239,25 @@ class CodexUsageWidget extends BaseWidget {
         ? resets.applicable_available_count : null;
       const lines = [];
       if (available !== null || applicable !== null) {
-        lines.push(`Resets: ${available} available · ${applicable} applicable now`);
+        lines.push(`Reset credits: ${available} available · ${applicable} applicable now`);
       }
       for (const credit of Array.isArray(resets.credits) ? resets.credits : []) {
         if (!credit || typeof credit !== 'object') continue;
-        const parts = [
-          credit.id,
-          credit.type,
-          credit.status,
-          credit.issued_at && `issued: ${credit.issued_at}`,
-          credit.expires_at && `expires: ${credit.expires_at}`,
-          credit.description,
-        ].filter((value) => typeof value === 'string' && value.trim());
-        if (parts.length) lines.push(parts.join(' · '));
+        const description = typeof credit.description === 'string' ? credit.description : '';
+        const isFreeReset = /free rate.?limit reset/i.test(description);
+        const type = typeof credit.type === 'string'
+          ? credit.type.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+          : '';
+        const status = typeof credit.status === 'string'
+          ? credit.status.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+          : '';
+        const title = isFreeReset ? 'Free reset' : `${type || 'Reset'} credit`;
+        lines.push(`${title}${status ? ` · ${status}` : ''}`);
+        const issued = fmtCreditDate(credit.issued_at);
+        const expires = fmtCreditDate(credit.expires_at);
+        const dates = [issued && `Issued ${issued}`, expires && `Expires ${expires}`].filter(Boolean);
+        if (dates.length) lines.push(dates.join(' · '));
+        if (description && !isFreeReset) lines.push(description);
       }
       resetCreditsEl.textContent = lines.join('\n');
       if (lines.length) resetCreditsEl.classList.add('is-visible');

@@ -65,7 +65,7 @@ async function main() {
   let snapshot = {
     reset_credits: { available_count: 1, applicable_available_count: 0,
       credits: [{ id: 'credit-1', type: 'weekly', status: 'available', issued_at: '2026-10-01',
-        expires_at: '2026-10-08', description: 'Bonus reset' }] },
+        expires_at: '2026-10-08', description: 'Granted one free rate limit reset.' }] },
     plan: 'plus',
     fetched_at: new Date(fixedNowMs).toISOString(),
     limit_reached: false,
@@ -88,7 +88,7 @@ async function main() {
     snapshot = {
       reset_credits: { available_count: 1, applicable_available_count: 0,
         credits: [{ id: 'credit-1', type: 'weekly', status: 'available', issued_at: '2026-10-01',
-          expires_at: '2026-10-08', description: 'Bonus reset' }] },
+          expires_at: '2026-10-08', description: 'Granted one free rate limit reset.' }] },
       plan: 'plus',
       fetched_at: new Date(fixedNowMs + 3_600_000).toISOString(),
       limit_reached: false,
@@ -153,14 +153,15 @@ async function main() {
 
   assert.ok(nodes.get('.usage-reset-primary').textContent.includes('in 1h 0m'));
   assert.ok(nodes.get('.usage-reset-secondary').textContent.includes('in 23h 0m'));
+  assert.match(nodes.get('.usage-reset-primary').textContent, /^Reset: \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} · in 1h 0m$/);
   assert.ok(nodes.get('.usage-forecast-primary').textContent.startsWith('Not enough: limit expected to run out in 20m'));
   assert.ok(nodes.get('.usage-forecast-primary').classList.contains('is-warn'));
   assert.ok(nodes.get('.usage-forecast-secondary').textContent.startsWith('Enough: limit expected to run out in 3d 7h'));
   assert.ok(nodes.get('.usage-forecast-secondary').classList.contains('is-ok'));
-  assert.strictEqual(
-    nodes.get('.codex-reset-credits').textContent,
-    'Resets: 1 available · 0 applicable now\ncredit-1 · weekly · available · issued: 2026-10-01 · expires: 2026-10-08 · Bonus reset',
-  );
+  const resetCreditsText = nodes.get('.codex-reset-credits').textContent;
+  assert.match(resetCreditsText, /^Reset credits: 1 available · 0 applicable now\nFree reset · Available\nIssued \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} · Expires \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$/);
+  assert.ok(!resetCreditsText.includes('credit-1'));
+  assert.ok(!resetCreditsText.includes('Thanks for using Codex'));
   assert.strictEqual(
     widget._usageForecast('primary', { used_percent: 90, reset_at: fixedNowSec + 7_200 }, null, fixedNowMs, () => 'time'),
     'Snapshot time unavailable',
