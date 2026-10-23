@@ -1040,11 +1040,13 @@ body::before {
 }
 
 .codex-window-block .codex-window-reset {
-  margin: 5px 0 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
+  margin: 0;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-secondary);
   font-family: 'JetBrains Mono', monospace;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .codex-window-forecast {
@@ -1074,6 +1076,19 @@ body::before {
 .codex-credits:not(.unlimited):not(:empty) {
   display: block;
 }
+
+.codex-reset-credits {
+  display: none;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.codex-reset-credits.is-visible { display: block; }
 
 /* ── Promotions Widget ─────────────────────── */
 .promo-list {
