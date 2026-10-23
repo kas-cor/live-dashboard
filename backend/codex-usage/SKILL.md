@@ -63,6 +63,11 @@ client_id=`app_EMoamEEZ73f0CkXaXp7hrann`) **ротирует refresh-токен*
     "secondary": { "used_percent": 3, "window_seconds": 604800, "reset_at": 1791585509, "reset_in_seconds": 529766 }
   },
   "credits": { "has_credits": false, "unlimited": false, "balance": "0" },
+  "reset_credits": {
+    "available_count": 1,
+    "applicable_available_count": 0,
+    "credits": [{ "id": "...", "type": "...", "status": "...", "issued_at": "...", "expires_at": "...", "description": "..." }]
+  },
   "model_usage": { "gpt-6-astra": { "available": true } }
 }
 ```
@@ -72,6 +77,9 @@ client_id=`app_EMoamEEZ73f0CkXaXp7hrann`) **ротирует refresh-токен*
   другим — заголовок виджет строит из `window_seconds`, а не хардкодом
 - `limit_reached` — жёсткий стоп (бейдж в виджете)
 - `credits` — докупленные кредиты сверх плана
+- `reset_credits` — счётчик и выданные сбросы из внутренних `/wham/usage` и
+  `/wham/rate-limit-reset-credits` endpoints. Эти запросы только читают данные;
+  внутренний API может измениться или быть недоступен, не ломая основной снимок.
 
 ## Как это работает
 

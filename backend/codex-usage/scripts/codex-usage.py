@@ -21,6 +21,8 @@ import urllib.request
 AUTH_FILE = os.environ.get("CODEX_AUTH_FILE", os.path.expanduser("~/.codex/auth.json"))
 OUT_FILE = os.environ.get("CODEX_USAGE_OUT", "/projects/dashboard/data/codex-usage.json")
 API_URL = os.environ.get("CODEX_USAGE_API", "https://chatgpt.com/backend-api/codex/usage")
+RESET_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
 # OAuth client id of the Codex CLI (used by `codex login`).
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -93,6 +95,50 @@ def fetch(iid, auth):
         return json.loads(r.read())
 
 
+def fetch_url(url, auth, iid):
+    request_headers = headers(auth, iid)
+    request_headers["ChatGPT-Account-Id"] = auth["tokens"]["account_id"]
+    req = urllib.request.Request(url, headers=request_headers)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())
+
+
+def reset_credit_data(usage, details):
+    counts = usage.get("rate_limit_reset_credits") or usage.get("rateLimitResetCredits") or {}
+    if not isinstance(counts, dict):
+        counts = {}
+    detail_payload = details.get("rateLimitResetCredits", {}) if isinstance(details, dict) else {}
+    if not isinstance(detail_payload, dict):
+        detail_payload = {}
+    credits = (details.get("credits") or detail_payload.get("credits")
+               if isinstance(details, dict) else None)
+    if not isinstance(credits, list):
+        credits = []
+    aliases = {
+        "id": ("id",), "type": ("type",), "status": ("status",),
+        "issued_at": ("issued_at", "issuedAt", "granted_at", "grantedAt"),
+        "expires_at": ("expires_at", "expiresAt"), "description": ("description",),
+    }
+    normalized = []
+    for credit in credits:
+        if not isinstance(credit, dict):
+            continue
+        item = {}
+        for field, keys in aliases.items():
+            value = next((credit[key] for key in keys if key in credit), None)
+            if isinstance(value, (str, int, float)):
+                item[field] = str(value)
+        normalized.append(item)
+    return {
+        "available_count": usage.get("available_count", usage.get("availableCount", counts.get(
+            "available_count", counts.get("availableCount")))),
+        "applicable_available_count": usage.get("applicable_available_count", usage.get(
+            "applicableAvailableCount", counts.get("applicable_available_count",
+                                                    counts.get("applicableAvailableCount")))),
+        "credits": normalized,
+    }
+
+
 def window(w):
     w = w or {}
     return {
@@ -114,6 +160,24 @@ def main():
         refresh(auth)
         raw = fetch(iid, auth)
 
+    resets = {"available_count": None, "applicable_available_count": None, "credits": []}
+    try:
+        reset_usage = fetch_url(RESET_USAGE_URL, auth, iid)
+        resets = reset_credit_data(reset_usage, {})
+        reset_details = fetch_url(RESET_CREDITS_URL, auth, iid)
+        resets["credits"] = reset_credit_data({}, reset_details)["credits"]
+    except urllib.error.HTTPError as e:
+        if e.code not in (401, 403):
+            print(f"codex-usage: reset-credit endpoints unavailable (HTTP {e.code})", file=sys.stderr)
+        else:
+            refresh(auth)
+            reset_usage = fetch_url(RESET_USAGE_URL, auth, iid)
+            resets = reset_credit_data(reset_usage, {})
+            reset_details = fetch_url(RESET_CREDITS_URL, auth, iid)
+            resets["credits"] = reset_credit_data({}, reset_details)["credits"]
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        print(f"codex-usage: reset-credit endpoints unavailable ({type(e).__name__})", file=sys.stderr)
+
     rl = raw.get("rate_limit") or {}
     credits = raw.get("credits") or {}
     out = {
@@ -131,6 +195,7 @@ def main():
             "unlimited": credits.get("unlimited", False),
             "balance": str(credits.get("balance", "0")),
         },
+        "reset_credits": resets,
         "model_usage": raw.get("model_usage"),
     }
 
