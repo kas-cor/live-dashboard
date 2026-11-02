@@ -85,6 +85,30 @@ async function main() {
   try {
     await widget.update();
     assert.strictEqual(nodes.get('.usage-forecast-primary').textContent, 'Not enough usage history');
+    const urgent = { used_percent: 90, reset_at: fixedNowSec + 2 * 86400 };
+    const candidates = [
+      { status: 'available', expires_at: new Date(fixedNowMs + 3 * 86400000).toISOString() },
+      { status: 'available', expires_at: new Date(fixedNowMs + 86400000).toISOString() },
+      { status: 'used', expires_at: new Date(fixedNowMs + 3600000).toISOString() },
+    ];
+    assert.strictEqual(widget._urgentResetCreditIndex(urgent, candidates, fixedNowMs, fixedNowMs), 1);
+    assert.strictEqual(widget._urgentResetCreditIndex({ ...urgent, used_percent: 84 }, candidates, fixedNowMs, fixedNowMs), -1);
+    assert.strictEqual(widget._urgentResetCreditIndex({ ...urgent, reset_at: fixedNowSec + 3600 }, candidates, fixedNowMs, fixedNowMs), -1);
+    assert.strictEqual(widget._urgentResetCreditIndex(urgent, candidates, fixedNowMs - 3600000, fixedNowMs), -1);
+    assert.strictEqual(widget._urgentResetCreditIndex(urgent, [{ status: 'available', expires_at: 'invalid' }], fixedNowMs, fixedNowMs), -1);
+    assert.strictEqual(widget._urgentResetCreditIndex({ ...urgent, used_percent: 85 }, candidates, fixedNowMs, fixedNowMs), 1);
+    assert.strictEqual(widget._urgentResetCreditIndex({ ...urgent, reset_at: fixedNowSec + 86400 }, candidates, fixedNowMs, fixedNowMs), -1);
+    assert.strictEqual(widget._urgentResetCreditIndex(urgent, [{ status: 'available', expires_at: new Date(fixedNowMs - 1).toISOString() }], fixedNowMs, fixedNowMs), -1);
+    const savedSecondaryHistory = storage.get('codex-usage-history-v1-secondary');
+    snapshot.windows.secondary = { ...urgent, window_seconds: 604800 };
+    snapshot.reset_credits.credits = candidates.map((credit, i) => ({ ...credit, type: `credit-${i}`, description: i === 0 ? '<img src=x onerror=alert(1)>' : '' }));
+    await widget.update();
+    const urgentMarkup = nodes.get('.codex-reset-credits').innerHTML;
+    assert.match(urgentMarkup, /<span class="codex-reset-credit-urgent">Credit 1 credit · Available<\/span>/);
+    assert.ok(!urgentMarkup.includes('<img'));
+    assert.ok(urgentMarkup.includes('&lt;img'));
+    assert.ok(!urgentMarkup.includes('<span class="codex-reset-credit-urgent">Credit 0'));
+    storage.set('codex-usage-history-v1-secondary', savedSecondaryHistory);
     snapshot = {
       reset_credits: { available_count: 1, applicable_available_count: 0,
         credits: [{ id: 'credit-1', type: 'weekly', status: 'available', issued_at: '2026-10-01',

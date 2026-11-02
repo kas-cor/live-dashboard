@@ -117,6 +117,24 @@ class CodexUsageWidget extends BaseWidget {
     return result + endText;
   }
 
+  _urgentResetCreditIndex(weekly, credits, fetchedAtMs, nowMs) {
+    if (!Number.isFinite(fetchedAtMs) || fetchedAtMs > nowMs + 300_000
+      || nowMs - fetchedAtMs > 900_000 || !Number.isFinite(weekly.used_percent)
+      || weekly.used_percent < 85 || weekly.used_percent > 100
+      || !Number.isFinite(weekly.reset_at) || weekly.reset_at * 1000 - nowMs <= 86400_000) return -1;
+    let selected = -1;
+    let earliest = Infinity;
+    credits.forEach((credit, index) => {
+      if (!credit || typeof credit.status !== 'string' || credit.status.toLowerCase() !== 'available') return;
+      const expiry = Date.parse(credit.expires_at);
+      if (Number.isFinite(expiry) && expiry > nowMs && expiry < earliest) {
+        earliest = expiry;
+        selected = index;
+      }
+    });
+    return selected;
+  }
+
   async update() {
     let d;
     try { d = await (await fetch(this.apiUrl)).json(); }
@@ -238,11 +256,16 @@ class CodexUsageWidget extends BaseWidget {
       const applicable = Number.isFinite(resets.applicable_available_count)
         ? resets.applicable_available_count : null;
       const lines = [];
+      const creditItems = Array.isArray(resets.credits) ? resets.credits : [];
+      const urgentIndex = this._urgentResetCreditIndex((d.windows || {}).secondary || {}, creditItems, fetchedAtMs, Date.now());
+      let urgentStart = -1;
+      let urgentEnd = -1;
       if (available !== null || applicable !== null) {
         lines.push(`Reset credits: ${available} available · ${applicable} applicable now`);
       }
-      for (const credit of Array.isArray(resets.credits) ? resets.credits : []) {
+      for (const [index, credit] of creditItems.entries()) {
         if (!credit || typeof credit !== 'object') continue;
+        if (index === urgentIndex) urgentStart = lines.length;
         const description = typeof credit.description === 'string' ? credit.description : '';
         const isFreeReset = /free rate.?limit reset/i.test(description);
         const type = typeof credit.type === 'string'
@@ -258,8 +281,20 @@ class CodexUsageWidget extends BaseWidget {
         const dates = [issued && `Issued ${issued}`, expires && `Expires ${expires}`].filter(Boolean);
         if (dates.length) lines.push(dates.join(' · '));
         if (description && !isFreeReset) lines.push(description);
+        if (index === urgentIndex) urgentEnd = lines.length;
       }
       resetCreditsEl.textContent = lines.join('\n');
+      if (urgentStart >= 0) {
+        // Escape all provider-supplied text before adding the highlight markup.
+        const escape = (text) => text.replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        })[char]);
+        resetCreditsEl.innerHTML = lines.map((line, index) => {
+          const safe = escape(line);
+          return index >= urgentStart && index < urgentEnd
+            ? `<span class="codex-reset-credit-urgent">${safe}</span>` : safe;
+        }).join('\n');
+      }
       if (lines.length) resetCreditsEl.classList.add('is-visible');
       else resetCreditsEl.classList.remove('is-visible');
     }
