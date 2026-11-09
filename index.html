@@ -31,7 +31,7 @@
   <script src="assets/js/widgets/ollama-usage.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/codex-usage.js?v=__CACHEBUSTER__"></script>
   <script src="assets/js/widgets/promotions.js?v=__CACHEBUSTER__"></script>
-  <script src="assets/js/widgets/parsec-save.js?v=__CACHEBUSTER__"></script>
+  <script src="assets/js/widgets/parsec-savings.js?v=__CACHEBUSTER__"></script>
 
   <!-- Theme toggle -->
   <script src="assets/js/widgets/theme-toggle.js"></script>
@@ -86,12 +86,12 @@
         title: '⚡ Codex Limits',
       }));
 
-      // Row 4: todo + parsec save tokens
-      dashboard.register(new ParsecSaveWidget('parsec-save', {
+      // Row 4: todo + parsec CLI savings
+      dashboard.register(new ParsecSavingsWidget('parsec-savings', {
         size: 'medium',
         interval: 30000,
-        apiUrl: API + '/api/parsec-save',
-        title: '💸 Parsec save',
+        apiUrl: API + '/api/parsec-savings',
+        title: 'Parsec savings',
       }));
       dashboard.register(new TodoWidget('todo', { size: 'medium', interval: 30000, apiUrl: API + '/api/todo' }));
 

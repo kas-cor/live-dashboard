@@ -1064,79 +1064,41 @@ def codex_usage():
     return data
 
 
-# --- Parsec save tokens (live savings of the parsec proxy) ---
-# Read-only over the parsec ledger — nothing here talks to the proxy itself.
-PARSEC_SCRIPTS = os.environ.get("PARSEC_SCRIPTS", "/app/parsec-scripts")
-PARSEC_LEDGER = os.environ.get("PARSEC_LEDGER", "/parsec-data/ledger.jsonl")
-PARSEC_PRICES = os.environ.get("PARSEC_PRICES", os.path.join(PARSEC_SCRIPTS, "parsec_prices.json"))
-PARSEC_CACHE_TTL = float(os.environ.get("PARSEC_CACHE_TTL", "5"))
-PARSEC_TOTALS_KEYS = (
-    "hours", "since", "requests", "measured_requests", "unmeasured_requests", "peak_requests",
-    "tokens_saved", "counterfactual_in", "usd_saved", "billed_in", "cache_read", "cache_write",
-    "output", "usd_cost", "saved_pct_of_counterfactual", "usd_saved_share_pct", "unpriced_models",
-)
-_parsec_module = None
-_parsec_cache = {"at": 0.0, "data": None}
-_parsec_lock = threading.Lock()
+# --- Parsec CLI savings report ---
+PARSEC_SAVINGS_BIN = os.environ.get("PARSEC_SAVINGS_BIN", "/root/.parsec/bin/parsec")
+PARSEC_SAVINGS_CACHE_TTL = 15
+_parsec_savings_cache = {"at": 0.0, "data": None}
+_parsec_savings_lock = threading.Lock()
 
 
-def _parsec_savings_module():
-    """Load backend/parsec-save/scripts/parsec_savings.py by path (no install needed)."""
-    global _parsec_module
-    if _parsec_module is None:
-        import importlib.util
-        path = os.path.join(PARSEC_SCRIPTS, "parsec_savings.py")
-        spec = importlib.util.spec_from_file_location("parsec_savings", path)
-        if spec is None or spec.loader is None:
-            raise FileNotFoundError(path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _parsec_module = module
-    return _parsec_module
-
-
-def _parsec_report():
-    with _parsec_lock:
-        cached = _parsec_cache["data"]
-        if cached is not None and time.time() - _parsec_cache["at"] < PARSEC_CACHE_TTL:
+@app.get("/api/parsec-savings")
+def parsec_savings():
+    """Return the verbatim output of the installed `parsec savings` CLI."""
+    with _parsec_savings_lock:
+        cached = _parsec_savings_cache["data"]
+        if cached is not None and time.time() - _parsec_savings_cache["at"] < PARSEC_SAVINGS_CACHE_TTL:
             return cached
-    data = _parsec_savings_module().compute(PARSEC_LEDGER, PARSEC_PRICES)
-    with _parsec_lock:
-        _parsec_cache["at"] = time.time()
-        _parsec_cache["data"] = data
-    return data
 
+        try:
+            result = subprocess.run(
+                [PARSEC_SAVINGS_BIN, "savings"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logging.warning("parsec savings command failed: %s", type(exc).__name__)
+            return {"error": "parsec_savings_unavailable"}
 
-@app.get("/api/parsec-save")
-def parsec_save(window: str = "", refresh: int = 0):
-    """Экономия parsec-прокси из ledger.jsonl — окна 24h / 7d / all, разбивка по моделям.
+        if result.returncode != 0:
+            logging.warning("parsec savings exited with status %s", result.returncode)
+            return {"error": "parsec_savings_failed"}
 
-    Без аргументов отдаёт все три окна. `?window=24h` дополнительно добавляет
-    `selected`/`selected_totals`, `?refresh=1` игнорирует 5-секундный кэш.
-    """
-    try:
-        if refresh:
-            with _parsec_lock:
-                _parsec_cache["data"] = None
-        data = _parsec_report()
-    except FileNotFoundError as exc:
-        return {"error": "no_ledger", "detail": str(exc), "ledger": PARSEC_LEDGER,
-                "generated_at": None, "windows": {}}
-    except Exception as exc:  # never take the dashboard down over a bad read
-        logging.warning("parsec-save: %s", exc)
-        return {"error": "parsec_savings_failed", "detail": str(exc),
-                "generated_at": None, "windows": {}}
-
-    data["cache_ttl"] = PARSEC_CACHE_TTL
-    if window:
-        selected = data.get("windows", {}).get(window)
-        if selected is None:
-            data["error"] = "unknown_window"
-            data["available_windows"] = sorted(data.get("windows", {}))
-        else:
-            data["selected"] = window
-            data["selected_totals"] = {k: selected.get(k) for k in PARSEC_TOTALS_KEYS}
-    return data
+        data = {"output": result.stdout, "generated_at": datetime.datetime.now().astimezone().isoformat()}
+        _parsec_savings_cache["at"] = time.time()
+        _parsec_savings_cache["data"] = data
+        return data
 
 
 # --- Alert Webhook Config ---
