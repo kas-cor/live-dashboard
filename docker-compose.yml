@@ -27,6 +27,7 @@ services:
       - BACKEND_HOSTNAME=${BACKEND_HOSTNAME:-host}
       - SSH_BIND_ADDRESS=${SSH_BIND_ADDRESS:-185.130.107.79}
       - PROMO_DB_PATH=/hermes-data/promotions.db
+      - PARSEC_SAVINGS_BIN=/root/.parsec/bin/parsec
     cap_add:
       - SYS_PTRACE
 
