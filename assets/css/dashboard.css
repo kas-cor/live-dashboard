@@ -1199,11 +1199,113 @@ body::before {
   background: var(--glass);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
+  gap: 6px;
+}
+
+#widget-parsec-savings.widget { padding: 16px; }
+
+.parsec-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
+
+.parsec-stat {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.parsec-stat-label {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .35px;
+  line-height: 1.2;
+}
+
+.parsec-stat strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-primary);
+  font: 600 14px 'JetBrains Mono', monospace;
+  line-height: 1.25;
+}
+
+.parsec-saved-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.parsec-saved-summary > div { min-width: 0; }
+.parsec-saved-summary > div > strong { color: var(--accent); font: 700 17px 'JetBrains Mono', monospace; }
+
+.parsec-saved-percent {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 12px;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  font: 600 12px 'JetBrains Mono', monospace;
+}
+
+.parsec-input-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.parsec-input-stat { min-width: 0; }
+.parsec-input-stat span { display: block; color: var(--text-secondary); font-size: 10px; }
+.parsec-input-stat strong { color: var(--text-primary); font: 500 12px 'JetBrains Mono', monospace; }
+.parsec-input-arrow { color: var(--text-secondary); text-align: center; }
+
+.parsec-cache-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 8px;
+}
+
+.parsec-cache-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 7px;
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+
+.parsec-cache-stat > span {
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.parsec-cache-stat > strong {
+  color: var(--text-primary);
+  font: 500 11px 'JetBrains Mono', monospace;
+}
+
+.parsec-cache-stat-full {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.parsec-cache-stat-full > strong { color: var(--warning); }
 
 .parsec-section {
   display: flex;
@@ -1215,7 +1317,7 @@ body::before {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .parsec-summary .parsec-value {
@@ -1227,15 +1329,15 @@ body::before {
 
 .parsec-label {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: .6px;
 }
 
 .parsec-value {
   color: var(--text-primary);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
 }
 
@@ -1269,10 +1371,12 @@ body::before {
 }
 
 .parsec-model-row {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name requests" "tokens tokens";
   align-items: center;
-  padding: 6px 0;
+  gap: 2px 8px;
+  padding: 5px 2px;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
@@ -1282,28 +1386,144 @@ body::before {
 }
 
 .parsec-model-name {
+  grid-area: name;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--accent-secondary);
   font-weight: 600;
   font-family: 'JetBrains Mono', monospace;
 }
 
-.parsec-model-stats {
-  display: flex;
-  gap: 12px;
-}
-
 .parsec-model-request {
+  grid-area: requests;
   color: var(--text-secondary);
   font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .parsec-model-tokens {
+  grid-area: tokens;
+  justify-self: end;
   color: var(--success);
   font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  white-space: nowrap;
 }
+
+
+.parsec-fail-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.parsec-fail-stat { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
+.parsec-fail-stat .parsec-label { font-size: 9px; letter-spacing: .4px; }
+.parsec-fail-stat strong { color: var(--text-primary); font: 500 11px 'JetBrains Mono', monospace; }
 
 .parsec-savings-error {
   color: var(--danger);
   text-align: center;
   padding: 16px;
+}
+
+.ollama-report {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ollama-report-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ollama-report-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.ollama-report-label,
+.ollama-report-period,
+.ollama-report-note {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ollama-report-summary strong {
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+}
+
+.ollama-report-note {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.ollama-report-model-list {
+  max-height: 140px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.parsec-model-row {
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.parsec-model-stats {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px 8px;
+}
+
+.ollama-report-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ollama-report-model-list .model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name requests" "cost cost";
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 0;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.ollama-report-model-list .model-row:last-child { border-bottom: none; }
+.ollama-report-model-list .model-name {
+  grid-area: name;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ollama-report-model-list .model-reqs { grid-area: requests; color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
+.ollama-report-model-list .model-cost { grid-area: cost; justify-self: end; color: var(--accent); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+.ollama-report-model-list { max-height: 112px; }
+#widget-ollama-usage.widget-medium { height: 400px; }
+.ollama-report .models-header {
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .8px;
+  text-transform: uppercase;
 }

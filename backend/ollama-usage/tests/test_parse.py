@@ -83,6 +83,21 @@ FREE_HTML = """
 """
 
 
+REPORT_HTML = """
+<section aria-label="Usage breakdown">
+  <h2>Cost</h2><p class="mt-0.5">Nov 1–10, UTC</p>
+  <dl>
+    <div><dt>Total cost</dt><dd>$0.05</dd></div>
+    <div><dt>Model cost</dt><dd>$0.04</dd></div>
+    <div><dt>Requests</dt><dd>1,024</dd></div>
+  </dl>
+  <table><tbody>
+    <tr><td>beam</td><td>1,024</td><td>1.2M</td><td>14.8K</td><td>$0.04</td></tr>
+  </tbody></table>
+</section>
+"""
+
+
 class TestProMarkup(unittest.TestCase):
     """Платный тариф: aria-label в деньгах, процент только в ширине заливки."""
 
@@ -129,6 +144,20 @@ class TestPlanAndAmounts(unittest.TestCase):
         self.assertEqual(mod._parse_amount("1,234.56"), 1234.56)
         self.assertEqual(mod._parse_amount("1.234,56"), 1234.56)
         self.assertIsNone(mod._parse_amount("abc"))
+
+
+class TestUsageReport(unittest.TestCase):
+    def test_parses_cost_report_without_inventing_a_quota(self):
+        data = mod.parse_usage_report(REPORT_HTML)
+        self.assertEqual(data["report"]["total_cost"], 0.05)
+        self.assertEqual(data["report"]["model_cost"], 0.04)
+        self.assertEqual(data["report"]["requests"], 1024)
+        self.assertEqual(data["report"]["period"], "Nov 1–10, UTC")
+        self.assertEqual(data["report"]["models"][0]["name"], "beam")
+        self.assertEqual(data["report"]["models"][0]["requests"], 1024)
+        self.assertEqual(data["report"]["models"][0]["input"], "1.2M")
+        self.assertIsNone(data["usage"]["percent"])
+        self.assertIsNone(data["usage"]["limit"])
 
 
 class TestDepletionProjection(unittest.TestCase):

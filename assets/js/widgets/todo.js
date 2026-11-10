@@ -41,24 +41,52 @@ class TodoWidget extends BaseWidget {
     const showPriority = this.getConfig('showPriority', true);
     const showDue = this.getConfig('showDue', true);
     const filterStatus = this.getConfig('filterStatus', 'all');
-    let d;
-    try { d = await (await fetch(this.apiUrl)).json(); } catch(e) { return; }
     const list = this.element.querySelector('#todo-list');
     const count = this.element.querySelector('#todo-count');
-    if(count) count.textContent = `${d.pending||0} \u0438\u0437 ${d.count||0}`;
-    if(!list) return;
-    let items = d.tasks || [];
+    let d;
+    try {
+      const response = await fetch(this.apiUrl, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      d = await response.json();
+    } catch (e) {
+      if (count) count.textContent = 'Unavailable';
+      if (list) list.innerHTML = '<div class="empty-state">Tasks are unavailable.</div>';
+      return;
+    }
+    if (!list) return;
+    if (d?.error || !Array.isArray(d?.tasks)) {
+      if (count) count.textContent = 'Unavailable';
+      list.innerHTML = '<div class="empty-state">Tasks are unavailable.</div>';
+      return;
+    }
+    if (count) count.textContent = `${d.pending || 0} \u0438\u0437 ${d.count || 0}`;
+    let items = d.tasks;
     if (filterStatus === 'pending') items = items.filter(t => t.status !== 'done');
     else if (filterStatus === 'done') items = items.filter(t => t.status === 'done');
     items = items.slice(0, maxItems);
-    if(!items.length) { list.innerHTML = '<div class="empty-state">All done! \uD83C\uDF89</div>'; return; }
-    list.innerHTML = items.map(t => `
-      <div class="todo-item ${t.status}">
-        ${showPriority ? `<span class="todo-priority ${t.priority}">${t.priority[0].toUpperCase()}</span>` : ''}
-        <span class="todo-text">${t.text}</span>
-        ${showDue && t.due ? `<span class="todo-due">${t.due}</span>` : ''}
-      </div>
-    `).join('');
+    if (!items.length) {
+      // Empty-state copy is selected from fixed literals, never API content.
+      const message = filterStatus === 'all' ? 'All done! 🎉' : 'No tasks match this filter.';
+      list.innerHTML = `<div class="empty-state">${message}</div>`;
+      return;
+    }
+    const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[char]);
+    const statuses = new Set(['pending', 'in_progress', 'active', 'done']);
+    const priorities = new Set(['low', 'medium', 'high']);
+    // Task text/date are escaped; CSS classes are restricted to known values.
+    list.innerHTML = items.map(t => {
+      const status = statuses.has(t.status) ? t.status : 'pending';
+      const priority = priorities.has(t.priority) ? t.priority : 'medium';
+      return `
+        <div class="todo-item ${status}">
+          ${showPriority ? `<span class="todo-priority ${priority}">${priority[0].toUpperCase()}</span>` : ''}
+          <span class="todo-text">${escape(t.text)}</span>
+          ${showDue && t.due ? `<span class="todo-due">${escape(t.due)}</span>` : ''}
+        </div>
+      `;
+    }).join('');
   }
 }
 window.TodoWidget = TodoWidget;

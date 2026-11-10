@@ -46,25 +46,58 @@ class OllamaUsageWidget extends BaseWidget {
     try { d = await (await fetch(this.apiUrl)).json(); }
     catch(e) { return; }
 
-    if (d.error === 'no_data') {
+    if (d?.error === 'no_data' || d?.error) {
       const body = this.element.querySelector('.widget-body');
-      if (body) body.innerHTML = '<div class="ollama-card"><div class="ollama-plan-line">No data yet — waiting for first fetch...</div></div>';
+      if (body) body.innerHTML = '<div class="ollama-card"><div class="ollama-plan-line">No current usage data available.</div></div>';
       return;
     }
 
     const body = this.element.querySelector('.widget-body');
     if (!body) return;
 
+    if (d.report) {
+      const report = d.report;
+      const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[char]);
+      const money = (value) => {
+        const amount = Number(value);
+        return value == null || !Number.isFinite(amount) ? '—' : `$${amount.toFixed(2)}`;
+      };
+      const models = Array.isArray(report.models) ? report.models : [];
+      // Provider-controlled strings are HTML-escaped before this template is inserted.
+      body.innerHTML = `<div class="ollama-card ollama-report">
+        <div class="ollama-report-summary">
+          <div><span class="ollama-report-label">Total cost</span><strong>${money(report.total_cost)}</strong></div>
+          <div><span class="ollama-report-label">Requests</span><strong>${escape(report.requests ?? '—')}</strong></div>
+        </div>
+        <div class="ollama-report-period">${escape(report.period || 'Current period')} · Model cost ${money(report.model_cost)}</div>
+        <div class="ollama-report-note">Usage quota and percentage are not provided in the current Ollama report.</div>
+        ${models.length ? `<div class="ollama-models"><div class="models-header">Models (${models.length})</div><div class="models-list ollama-report-model-list">${models.map((model) => `<div class="model-row">
+          <span class="model-name">${escape(model.name)}</span><span class="model-reqs">${escape(model.requests)} requests</span>
+          <span class="model-cost">${money(model.cost)}</span></div>`).join('')}</div></div>` : ''}
+      </div>`;
+      const stamp = this.element.querySelector('.last-update');
+      if (stamp && d.fetched_at) stamp.textContent = new Date(d.fetched_at).toLocaleTimeString('en-GB', { hour12: false });
+      return;
+    }
+
+    const usage = d.usage || {};
+    const plan = d.plan || 'unknown';
+    if (plan === 'unknown' || typeof usage.percent !== 'number' || !Number.isFinite(usage.percent)) {
+      // Fixed explanatory text; do not invent 0% when quota data is absent.
+      body.innerHTML = '<div class="ollama-card"><div class="ollama-plan-line">No current included-usage data available.</div></div>';
+      return;
+    }
+
     // Plan line — единый месячный пул Included usage
     const planEl = body.querySelector('.ollama-plan-line');
-    const plan = d.plan || 'unknown';
     if (planEl) {
       const planName = plan.charAt(0).toUpperCase() + plan.slice(1);
       planEl.innerHTML = `<span class="status-indicator status-online"></span> ${planName} · included usage`;
     }
 
-    const usage = d.usage || {};
-    const usagePct = usage.percent || 0;
+    const usagePct = usage.percent;
 
     // Helper: format reset as relative time
     const fmtReset = (iso) => {
@@ -124,7 +157,9 @@ class OllamaUsageWidget extends BaseWidget {
     // Models this month (по доле usage)
     const modelsList = body.querySelector('.models-list');
     if (modelsList && usage.models) {
-      const sorted = [...usage.models].sort((a, b) => b.percent - a.percent).slice(0, 5);
+      const sorted = [...usage.models].sort((a, b) => b.percent - a.percent);
+      const modelsHeader = body.querySelector('.models-header');
+      if (modelsHeader) modelsHeader.textContent = `Models this month (${sorted.length})`;
       const maxPct = sorted.length ? Math.max(...sorted.map(m => m.percent || 0)) : 0;
       modelsList.innerHTML = sorted.map(m => {
         const pct = m.percent || 0;

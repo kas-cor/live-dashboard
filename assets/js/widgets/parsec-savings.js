@@ -7,7 +7,6 @@ class ParsecSavingsWidget extends BaseWidget {
   }
 
   parseSavingsOutput(text) {
-    const lines = text.trim().split('\n');
     const data = {
       summary: {},
       input: {},
@@ -15,57 +14,28 @@ class ParsecSavingsWidget extends BaseWidget {
       models: [],
       failOpen: {}
     };
+    const lines = text.trim().split('\n');
+    const number = (value) => Number(value.replaceAll(',', ''));
+    for (const line of lines) {
+      const header = line.match(/proxy ledger — ([\d,]+) request\(s\) \/ ([\d,]+) conversation\(s\):/);
+      if (header) data.summary = { totalRequests: number(header[1]), totalConversations: number(header[2]) };
 
-    // Header: "proxy ledger — 79 request(s) / 13 conversation(s):"
-    const headerMatch = lines[0].match(/proxy ledger — (\d+) request\(s\) \/ (\d+) conversation\(s\):/);
-    if (headerMatch) {
-      data.summary = {
-        totalRequests: parseInt(headerMatch[1], 10),
-        totalConversations: parseInt(headerMatch[2], 10)
+      const input = line.match(/input: ([\d,]+) counterfactual vs ([\d,]+) billed\(\+cache\) → ~?([\d,]+) tok saved \(([\d.]+)%\)/);
+      if (input) data.input = {
+        counterfactualTokens: number(input[1]),
+        billedTokens: number(input[2]),
+        tokensSaved: number(input[3]),
+        savePercent: parseFloat(input[4])
       };
-    }
 
-    // Input line: "input: ... vs ... billed(+cache) → ~... tok saved (...%)"
-    const inputMatch = lines[1].match(/input: (.+?) → ~(\d+) tok saved \(([\d.]+)%\)/);
-    if (inputMatch) {
-      data.input = {
-        comparison: inputMatch[1],
-        tokensSaved: parseInt(inputMatch[2], 10),
-        savePercent: parseFloat(inputMatch[3])
-      };
-    }
+      const cache = line.match(/cache: ([\d,]+) read \/ ([\d,]+) write.*?freezer trimmed ~([\d,]+) tok/);
+      if (cache) data.cache = { reads: number(cache[1]), writes: number(cache[2]), freezerTrimmed: number(cache[3]) };
 
-    // Cache line: "cache: ... read / ... write (n/a) · freezer trimmed ~... tok (diagnostic)"
-    const cacheMatch = lines[3].match(/cache: (\d+) read \/ (\d+) write.*freezer trimmed ~(\d+) tok/);
-    if (cacheMatch) {
-      data.cache = {
-        reads: parseInt(cacheMatch[1], 10),
-        writes: parseInt(cacheMatch[2], 10),
-        freezerTrimmed: parseInt(cacheMatch[3], 10)
-      };
-    }
+      const model = line.match(/^\s+(\S+): ([\d,]+) req · ~?([\d,]+) tok saved \(([\d.]+)%\)/);
+      if (model) data.models.push({ name: model[1], requests: number(model[2]), tokensSaved: number(model[3]), savePercent: parseFloat(model[4]) });
 
-    // Model lines (lines 4-5 or 4-6)
-    for (let i = 4; i < lines.length - 1; i++) {
-      const modelMatch = lines[i].match(/(\S+): (\d+) req · ~(\d+) tok saved \(([\d.]+)%\)/);
-      if (modelMatch) {
-        data.models.push({
-          name: modelMatch[1],
-          requests: parseInt(modelMatch[2], 10),
-          tokensSaved: parseInt(modelMatch[3], 10),
-          savePercent: parseFloat(modelMatch[4])
-        });
-      }
-    }
-
-    // Fail-open line: "fail-open: ... request(s), ... scorer step(s) · ... null probe(s) excluded"
-    const failMatch = lines[lines.length - 1].match(/fail-open: (\d+) request\(s\), (\d+) scorer step\(s\) · (\d+) null probe\(s\) excluded/);
-    if (failMatch) {
-      data.failOpen = {
-        requests: parseInt(failMatch[1], 10),
-        scorerSteps: parseInt(failMatch[2], 10),
-        nullProbes: parseInt(failMatch[3], 10)
-      };
+      const fail = line.match(/fail-open: (\d+) request\(s\), (\d+) scorer step\(s\) · (\d+) null probe\(s\) excluded/);
+      if (fail) data.failOpen = { requests: number(fail[1]), scorerSteps: number(fail[2]), nullProbes: number(fail[3]) };
     }
 
     return data;
@@ -79,9 +49,10 @@ class ParsecSavingsWidget extends BaseWidget {
       </div>
       <div class="widget-body">
         <div class="parsec-savings-container" aria-live="polite" aria-busy="true">
-          <div class="parsec-savings-loading">Загрузка...</div>
+          <div class="parsec-savings-loading">Loading…</div>
         </div>
       </div>`;
+    this.element.classList.add('widget-scroll');
   }
 
   async update() {
@@ -102,66 +73,65 @@ class ParsecSavingsWidget extends BaseWidget {
       }
     } catch (error) {
       this.setError(`parsec-savings: ${error.message}`);
-      if (container && !container.innerHTML) {
-        container.innerHTML = '<div class="parsec-savings-error">Не удалось получить отчёт Parsec.</div>';
+      if (container) {
+        container.innerHTML = '<div class="parsec-savings-error">Could not load the Parsec report.</div>';
         container.setAttribute('aria-busy', 'false');
       }
     }
   }
 
+  escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[char]);
+  }
+
+  formatCompactTokens(value) {
+    return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+  }
+
   renderParsedData(data) {
     if (!data.summary.totalRequests) {
-      return '<div class="parsec-savings-empty">Нет данных для отображения</div>';
+      return '<div class="parsec-savings-empty">No savings data available.</div>';
     }
 
     return `
       <div class="parsec-savings-card">
-        <!-- Summary -->
-        <div class="parsec-section">
-          <div class="parsec-row parsec-summary">
-            <span class="parsec-label">Итого</span>
-            <span class="parsec-value">${data.summary.totalRequests} запросов / ${data.summary.totalConversations} диалогов</span>
-          </div>
+        <div class="parsec-summary-grid">
+          <div class="parsec-stat"><span class="parsec-stat-label">Requests</span><strong>${data.summary.totalRequests.toLocaleString()}</strong></div>
+          <div class="parsec-stat"><span class="parsec-stat-label">Conversations</span><strong>${data.summary.totalConversations.toLocaleString()}</strong></div>
         </div>
 
-        <!-- Input Savings -->
         ${data.input.tokensSaved ? `
-        <div class="parsec-section">
-          <div class="parsec-row">
-            <span class="parsec-label">Токены спёржены</span>
-            <span class="parsec-value">${data.input.tokensSaved?.toLocaleString()} tok (${data.input.savePercent}%)</span>
-          </div>
-          <div class="parsec-input-detail">
-            <span class="parsec-input-comparison">${data.input.comparison}</span>
-          </div>
+        <section class="parsec-saved-summary">
+          <div><span class="parsec-stat-label">Tokens saved</span><strong>${data.input.tokensSaved.toLocaleString()}</strong></div>
+          <span class="parsec-saved-percent">${data.input.savePercent}%</span>
+        </section>
+        ${data.input.counterfactualTokens != null && data.input.billedTokens != null ? `
+        <div class="parsec-input-summary">
+          <div class="parsec-input-stat"><span>Baseline</span><strong title="${data.input.counterfactualTokens.toLocaleString()} tokens">${this.formatCompactTokens(data.input.counterfactualTokens)}</strong></div>
+          <span class="parsec-input-arrow" aria-hidden="true">→</span>
+          <div class="parsec-input-stat"><span>Billed</span><strong title="${data.input.billedTokens.toLocaleString()} tokens">${this.formatCompactTokens(data.input.billedTokens)}</strong></div>
         </div>` : ''}
+        ` : ''}
 
-        <!-- Cache -->
-        <div class="parsec-section">
-          <div class="parsec-row">
-            <span class="parsec-label">Кеш</span>
-            <span class="parsec-value">${data.cache.reads?.toLocaleString()} чтений / ${data.cache.writes?.toLocaleString()} записей</span>
-          </div>
-          ${data.cache.freezerTrimmed ? `
-          <div class="parsec-row parsec-freezer">
-            <span class="parsec-label">Freezer</span>
-            <span class="parsec-value">${data.cache.freezerTrimmed?.toLocaleString()} tok обрезано</span>
-          </div>` : ''}
+        <div class="parsec-cache-grid">
+          <div class="parsec-cache-stat"><span>Cache reads</span><strong>${this.formatCompactTokens(data.cache.reads || 0)}</strong></div>
+          <div class="parsec-cache-stat"><span>Writes</span><strong>${data.cache.writes?.toLocaleString()}</strong></div>
+          ${data.cache.freezerTrimmed ? `<div class="parsec-cache-stat parsec-cache-stat-full"><span>Freezer trimmed</span><strong>${this.formatCompactTokens(data.cache.freezerTrimmed)} tokens</strong></div>` : ''}
         </div>
 
         <!-- Models -->
         ${data.models.length ? `
         <div class="parsec-section">
-          <div class="parsec-section-title">Модели</div>
-          ${data.models.map(model => `
+          <div class="parsec-section-title">Models (${data.models.length})</div>
+          <div class="parsec-model-list">${data.models.map(model => `
             <div class="parsec-model-row">
-              <span class="parsec-model-name">${model.name}</span>
-              <span class="parsec-model-stats">
-                <span class="parsec-model-request">${model.requests} запрос</span>
-                <span class="parsec-model-tokens">${model.tokensSaved?.toLocaleString()} tok (${model.savePercent}%)</span>
-              </span>
+              <span class="parsec-model-name">${this.escapeHtml(model.name)}</span>
+              <span class="parsec-model-request">${model.requests.toLocaleString()} req</span>
+              <span class="parsec-model-tokens">${this.formatCompactTokens(model.tokensSaved)} tokens · ${model.savePercent}%</span>
             </div>
-          `).join('')}
+          `).join('')}</div>
         </div>` : ''}
 
         <!-- Fail-open -->
@@ -169,11 +139,11 @@ class ParsecSavingsWidget extends BaseWidget {
         <div class="parsec-section">
           <div class="parsec-row">
             <span class="parsec-label">Fail-open</span>
-            <span class="parsec-value">${data.failOpen.requests} запросов</span>
+            <span class="parsec-value">${data.failOpen.requests} requests</span>
           </div>
-          <div class="parsec-row parsec-fail-detail">
-            <span class="parsec-label">Скоря шагов: ${data.failOpen.scorerSteps}</span>
-            <span class="parsec-label">Нулевых проб: ${data.failOpen.nullProbes}</span>
+          <div class="parsec-fail-detail">
+            <span class="parsec-fail-stat"><span class="parsec-label">Scorer steps</span><strong>${data.failOpen.scorerSteps}</strong></span>
+            <span class="parsec-fail-stat"><span class="parsec-label">Null probes</span><strong>${data.failOpen.nullProbes}</strong></span>
           </div>
         </div>` : ''}
       </div>

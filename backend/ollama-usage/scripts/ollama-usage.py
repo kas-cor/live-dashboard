@@ -24,6 +24,7 @@ Session/Weekly теперь единый месячный пул "Included usage
 """
 
 import argparse
+from html.parser import HTMLParser
 import json
 import os
 import re
@@ -37,15 +38,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ollama_forecast as forecast  # noqa: E402
 
 SETTINGS_URL = "https://ollama.com/settings"
+USAGE_REPORT_URL = "https://ollama.com/settings/usage/report?scope=self"
 COOKIE_NAME = "__Secure-session"
 DEFAULT_COOKIE_FILE = os.path.expanduser("~/.hermes/scripts/.ollama-session-cookie")
 
 
-def fetch_page(url: str, cookie_value: str) -> str:
+def fetch_page(url: str, cookie_value: str, headers: dict | None = None) -> str:
     """Получает HTML страницы с кукой. Возвращает HTML или вызывает sys.exit(1)."""
     req = urllib.request.Request(url)
     req.add_header("Cookie", f"{COOKIE_NAME}={cookie_value}")
     req.add_header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+    for name, value in (headers or {}).items():
+        req.add_header(name, value)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             html = resp.read().decode("utf-8")
@@ -142,6 +146,100 @@ def parse_usage(html: str) -> dict:
     return result
 
 
+def parse_usage_report(html: str) -> dict:
+    """Parse the current monthly cost report without inventing quota data."""
+    class ReportParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.values = {}
+            self.label = None
+            self.capture = None
+            self.parts = []
+            self.in_body = False
+            self.in_row = False
+            self.in_cell = False
+            self.cell_parts = []
+            self.row = []
+            self.rows = []
+            self.period = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == "dt":
+                self.capture, self.parts = "label", []
+            elif tag == "dd":
+                self.capture, self.parts = "value", []
+            elif tag == "p" and "mt-0.5" in attrs.get("class", ""):
+                self.capture, self.parts = "period", []
+            elif tag == "tbody":
+                self.in_body = True
+            elif tag == "tr" and self.in_body:
+                self.in_row, self.row = True, []
+            elif tag == "td" and self.in_row:
+                self.in_cell, self.cell_parts = True, []
+
+        def handle_data(self, data):
+            if self.capture:
+                self.parts.append(data)
+            if self.in_cell:
+                self.cell_parts.append(data)
+
+        def handle_endtag(self, tag):
+            if tag in ("dt", "dd", "p") and self.capture:
+                value = " ".join("".join(self.parts).split())
+                if self.capture == "label":
+                    self.label = value
+                elif self.capture == "value" and self.label:
+                    self.values[self.label] = value
+                    self.label = None
+                elif self.capture == "period":
+                    self.period.append(value)
+                self.capture, self.parts = None, []
+            elif tag == "td" and self.in_cell:
+                self.row.append(" ".join("".join(self.cell_parts).split()))
+                self.in_cell = False
+            elif tag == "tr" and self.in_row:
+                if self.row:
+                    self.rows.append(self.row)
+                self.in_row = False
+            elif tag == "tbody":
+                self.in_body = False
+
+    parser = ReportParser()
+    parser.feed(html)
+    def parse_count(value: str) -> int | None:
+        value = value.strip()
+        if not re.fullmatch(r"\d[\d,]*", value):
+            return None
+        return int(value.replace(",", ""))
+
+    values = parser.values
+    models = []
+    for row in parser.rows:
+        requests_count = parse_count(row[1]) if len(row) >= 5 else None
+        if requests_count is not None:
+            models.append({"name": row[0], "requests": requests_count,
+                           "input": row[2], "output": row[3],
+                           "cost": _parse_amount(row[4].replace("$", ""))})
+    total_cost = _parse_amount(values.get("Total cost", "").replace("$", ""))
+    model_cost = _parse_amount(values.get("Model cost", "").replace("$", ""))
+    requests = parse_count(values.get("Requests", ""))
+    return {
+        "plan": "report",
+        "usage": {"percent": None, "used": None, "limit": None,
+                  "currency": None, "resets_at": None, "depletes_at": None,
+                  "models": [], "forecast": {}},
+        "report": {
+            "period": parser.period[0] if parser.period else None,
+            "total_cost": total_cost,
+            "model_cost": model_cost,
+            "requests": requests,
+            "models": models,
+        },
+        "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
 def enrich_forecast(data: dict, with_tokens: bool = True) -> dict:
     """Дополняет данные прогноза полями расчёта (мутирует и возвращает data).
 
@@ -178,6 +276,16 @@ def _project_depletion(percent: float, resets_at: str | None,
 
 def format_output(data: dict, verbose: bool = False) -> str:
     """Форматирует данные для красивого вывода."""
+    if data.get("report"):
+        report = data["report"]
+        lines = [f"Ollama Cloud cost report ({report.get('period') or 'current period'})"]
+        lines.append(f"Total cost: ${report['total_cost']:.2f}" if report.get("total_cost") is not None else "Total cost: unavailable")
+        lines.append(f"Requests: {report['requests']}" if report.get("requests") is not None else "Requests: unavailable")
+        if verbose:
+            for model in report.get("models", []):
+                cost = f"${model['cost']:.2f}" if model.get("cost") is not None else "cost unavailable"
+                lines.append(f"  {model['name']}: {model['requests']} requests · {cost}")
+        return "\n".join(lines)
     u = data["usage"]
     lines = [f"Ollama Cloud Included Usage ({data['plan']} plan)"]
     lines.append("")
@@ -340,8 +448,11 @@ def main():
 
     # Получаем и парсим данные
     html = fetch_page(SETTINGS_URL, cookie)
-    data = parse_usage(html)
-    data = enrich_forecast(data, with_tokens=not args.no_tokens)
+    if "Included usage" in html:
+        data = enrich_forecast(parse_usage(html), with_tokens=not args.no_tokens)
+    else:
+        report_html = fetch_page(USAGE_REPORT_URL, cookie, {"HX-Request": "true"})
+        data = parse_usage_report(report_html)
 
     # Режим записи в файл (для дашборда)
     if args.output_file:
